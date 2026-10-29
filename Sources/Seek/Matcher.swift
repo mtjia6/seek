@@ -97,6 +97,7 @@ enum Matcher {
             let atWord = !isAlnum(k[pos - 1])
             return (atWord ? .wordSubstring : .substring, coverage - min(pos, 30))
         }
+        if let r = compactMatch(k, stemLen: stemLen, qc: qc) { return r }
         if q.tokens.count > 1 {
             var all = true, boundaries = 0
             for t in q.tokens {
@@ -112,14 +113,42 @@ enum Matcher {
         return fuzzyOrNone(k, q: q, qc: qc)
     }
 
+    /// The query typed without separators ("cs2200") against a name that has
+    /// them ("CS-2200", "CS 2200 Textbook"): match while skipping spaces in the
+    /// name. Only starts at word boundaries, so it stays precise.
+    @inline(__always)
+    static func compactMatch(_ k: UnsafeBufferPointer<UInt8>, stemLen: Int, qc: UnsafeBufferPointer<UInt8>) -> (Tier, Int)? {
+        let m = qc.count
+        if m < 2 { return nil }
+        var start = 0
+        while start < k.count {
+            if (start == 0 || k[start - 1] == 32 || !isAlnum(k[start - 1])) && k[start] == qc[0] {
+                var i = start, j = 0
+                while i < k.count && j < m {
+                    if k[i] == 32 { i += 1; continue }
+                    if k[i] != qc[j] { break }
+                    i += 1; j += 1
+                }
+                if j == m {
+                    if start == 0 && (i == k.count || i == stemLen) { return (.exact, 100) }
+                    if start == 0 { return (.prefix, m * 100 / k.count - 5) }
+                    return (.wordSubstring, m * 100 / k.count - min(start, 30) - 5)
+                }
+            }
+            start += 1
+        }
+        return nil
+    }
+
     /// Greedy subsequence match with bonuses for word starts and runs.
-    /// Rejects matches spread so thin they are noise.
+    /// Must begin at a word start; rejects matches spread so thin they are noise.
     @inline(__always)
     static func fuzzyOrNone(_ k: UnsafeBufferPointer<UInt8>, q: Query, qc: UnsafeBufferPointer<UInt8>) -> (Tier, Int) {
         let m = qc.count
         if m < 3 || m > k.count { return (.none, 0) }
         var qi = 0, score = 0, last = -2, first = -1
         var i = 0
+        while i < k.count && !(k[i] == qc[0] && (i == 0 || !isAlnum(k[i - 1]))) { i += 1 }
         while i < k.count && qi < m {
             if k[i] == qc[qi] {
                 if first < 0 { first = i }
@@ -132,7 +161,7 @@ enum Matcher {
         }
         if qi < m { return (.none, 0) }
         let span = last - first + 1
-        if span > m * 3 + 3 { return (.none, 0) }
+        if span > m * 2 + 2 { return (.none, 0) }
         return (.fuzzy, score - (span - m) * 2 - first)
     }
 
