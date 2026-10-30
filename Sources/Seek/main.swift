@@ -20,6 +20,29 @@ if let qi = args.firstIndex(of: "--query"), qi + 1 < args.count {
     exit(0)
 }
 
+// Live-update self-test:  Seek --watch-test
+if args.contains("--watch-test") {
+    let index = FileIndex(); index.startWatching(); index.rescan()
+    let s = Searcher(index: index)
+    let dir = NSHomeDirectory() + "/Documents/seek_watch_test_dir"
+    let fm = FileManager.default
+    func check(_ q: String, _ label: String) {
+        Thread.sleep(forTimeInterval: 1.0)
+        let hits = (s.search(q) ?? []).filter { $0.tier == .exact }.map(\.path)
+        print("\(label): \(hits.isEmpty ? "—" : hits.joined(separator: ", "))")
+    }
+    try? fm.createDirectory(atPath: dir + "/inner", withIntermediateDirectories: true)
+    fm.createFile(atPath: dir + "/inner/zebra quokka.txt", contents: Data())
+    check("zebra quokka", "after create      ")
+    try? fm.moveItem(atPath: dir + "/inner/zebra quokka.txt", toPath: dir + "/inner/narwhal.txt")
+    check("zebra quokka", "old name gone     "); check("narwhal", "new name found    ")
+    try? fm.moveItem(atPath: dir, toPath: dir + "_moved")
+    check("narwhal", "dir moved         ")
+    try? fm.removeItem(atPath: dir + "_moved")
+    check("narwhal", "dir deleted       ")
+    exit(0)
+}
+
 /// Global hotkey via Carbon; needs no Accessibility permission.
 final class HotKey {
     private var ref: EventHotKeyRef?
