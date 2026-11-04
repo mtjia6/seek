@@ -54,8 +54,11 @@ Finder's search box is a front end to Spotlight's index. When that index is stal
 - **Semantic search.** Every document gets a 256-d vector from [potion-base-8M](https://huggingface.co/minishlab/potion-base-8M), a Model2Vec static embedding model, scanned exactly with Accelerate.
 - **Hybrid fusion.** The three retrievers run concurrently and merge with Reciprocal Rank Fusion; weights adapt to whether the query looks like a filename, a word, or a question.
 - **Live index.** Creates, edits, renames, folder moves and deletes are reflected within ~1 s (names) to ~2 s (contents).
-- **Snippets and match badges.** Each result shows the matching line and *why* it matched: content, text in image, or meaning.
+- **Evidence pane.** The selected result shows *why* it matched: the PDF page region with your words highlighted, the screenshot with boxes where OCR found them, the numbered code lines, or the matching passage. Step through hits with <kbd>⌥↓</kbd>.
+- **Match meter.** Three thin bars on every row show how strongly the name, the text and the meaning matched.
+- **Home screen.** Before you type: thumbnails of files you opened recently, what just arrived in Downloads/Desktop/Documents, index health, and a 14-day activity chart. Click a day to list what changed.
 - **Folder filter.** `dev/notchmusic` limits results to paths containing `dev`.
+- **Date filter.** `changed:today`, `changed:yesterday`, `changed:mon` (any weekday) or `changed:2026-10-30`, optionally with more words.
 
 ### Keys
 
@@ -66,7 +69,12 @@ Finder's search box is a front end to Spotlight's index. When that index is stal
 | <kbd>↩</kbd> | Open |
 | <kbd>⌘ ↩</kbd> | Reveal in Finder |
 | <kbd>⌥ ↩</kbd> | Copy path |
-| <kbd>Esc</kbd> | Close |
+| <kbd>⌘Y</kbd> | Quick Look |
+| <kbd>⌘1</kbd>–<kbd>⌘9</kbd> | Open that result |
+| <kbd>⇥</kbd> / <kbd>⇧⇥</kbd> | Next / previous scope (All, Names, Contents, Images, Folders) |
+| <kbd>⌥↓</kbd> <kbd>⌥↑</kbd> | Next / previous hit inside the selected file |
+| <kbd>←</kbd> <kbd>→</kbd> | Move between cards on the home screen |
+| <kbd>Esc</kbd> | Clear the query, then close |
 
 ## How it works
 
@@ -94,7 +102,10 @@ Nothing reads your files at search time; every keystroke queries structures buil
 | Content store | `ContentStore.swift` | FTS5, WAL mode, separate reader/writer connections |
 | Incremental sync | `ContentIndexer.swift` | files remembered by (mtime, size); FSEvents changes coalesced over 1 s |
 | Embeddings | `StaticEmbedding.swift`, `Semantic.swift` | WordPiece tokenizer + table lookup + mean, in pure Swift; no ML runtime |
-| Fusion + ranking | `Search.swift` | RRF (k = 60) with query-shape routing |
+| Fusion + ranking | `Search.swift` | RRF (k = 60) with query-shape routing, `changed:` filter |
+| Panel | `Panel.swift`, `Rows.swift`, `Home.swift` | results list, scope tabs, match meter, home screen |
+| Evidence | `Evidence.swift`, `EvidencePane.swift` | PDF crops, OCR hit boxes, code excerpts; loaded off the main thread |
+| Design tokens | `Theme.swift` | one accent, AA-checked text colors, nested radii, motion timings |
 
 ### Why potion-base-8M
 
@@ -170,7 +181,7 @@ Working and in daily use on one machine. Known gaps:
 
 ## What might come next
 
-- Query filters: `kind:pdf`, `in:Downloads`, `modified:last week`.
+- More query filters: `kind:pdf`, `in:Downloads`, date ranges like `changed:last week`.
 - External volumes.
 - int8-quantized vectors and multilingual embeddings.
 - A launchd agent with `KeepAlive` so indexing survives crashes.
