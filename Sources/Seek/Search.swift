@@ -7,6 +7,10 @@ struct SearchResult {
     let score: Int
     var snippet: String? = nil
     var sources: Sources = .name
+    /// How strongly each retriever matched, 0...1, for the match meter.
+    var signal = Signal()
+
+    struct Signal { var name: Float = 0, text: Float = 0, meaning: Float = 0 }
 
     struct Sources: OptionSet {
         let rawValue: Int
@@ -58,7 +62,50 @@ final class Searcher {
     var contextFolder: String?
     private let gen = Generation()
 
-    init(index: FileIndex, content: ContentIndexer? = nil) { self.index = index; self.content = content }
+    let activity: Activity
+
+    init(index: FileIndex, content: ContentIndexer? = nil) {
+        self.index = index; self.content = content
+        activity = Activity(index: index)
+    }
+
+    // MARK: - Date filter
+
+    /// `changed:today`, `changed:yesterday`, `changed:mon`…`changed:sun` (the most
+    /// recent such day), or `changed:2026-10-30`. Any other words narrow it further.
+    static func parseChanged(_ text: String) -> (range: Range<Date>, rest: String)? {
+        var rest: [Substring] = []
+        var range: Range<Date>?
+        let cal = Calendar.current
+        let today = cal.startOfDay(for: Date())
+        for w in text.split(separator: " ") {
+            guard w.lowercased().hasPrefix("changed:") else { rest.append(w); continue }
+            let v = w.dropFirst("changed:".count).lowercased()
+            var day: Date?
+            if v == "today" { day = today }
+            else if v == "yesterday" { day = cal.date(byAdding: .day, value: -1, to: today) }
+            else if let i = ["sun", "mon", "tue", "wed", "thu", "fri", "sat"].firstIndex(where: { v.hasPrefix($0) }) {
+                let back = (cal.component(.weekday, from: today) - 1 - i + 7) % 7
+                day = cal.date(byAdding: .day, value: -back, to: today)
+            } else {
+                let f = DateFormatter(); f.dateFormat = "yyyy-MM-dd"; f.timeZone = .current
+                day = f.date(from: String(v)).map { cal.startOfDay(for: $0) }
+            }
+            if let d = day, let end = cal.date(byAdding: .day, value: 1, to: d) { range = d..<end }
+        }
+        guard let range else { return nil }
+        return (range, rest.joined(separator: " "))
+    }
+
+    private func changedSearch(_ range: Range<Date>, rest: String, limit: Int) -> [SearchResult]? {
+        let inDay = activity.files(in: range).filter { !$0.path.contains("/.") }
+        if rest.trimmingCharacters(in: .whitespaces).isEmpty {
+            return inDay.prefix(limit).map { SearchResult(path: $0.path, isDir: false, tier: .none, score: 0, sources: []) }
+        }
+        let keep = Set(inDay.map(\.path))
+        guard let r = search(rest, limit: 400) else { return nil }
+        return Array(r.filter { keep.contains($0.path) }.prefix(limit))
+    }
 
     // MARK: - Hybrid search
 
@@ -83,6 +130,9 @@ final class Searcher {
     /// scales (tiers, BM25, cosine) combine without calibration, and a file that
     /// shows up in several lists rises. Exact-name matches are pinned above it all.
     func search(_ text: String, limit: Int = 60) -> [SearchResult]? {
+        if text.lowercased().contains("changed:"), let c = Self.parseChanged(text) {
+            return changedSearch(c.range, rest: c.rest, limit: limit)
+        }
         guard let content else { return nameSearch(text, limit: limit) }
         var names: [SearchResult]? = nil
         var hits: [ContentStore.Hit] = []
@@ -112,22 +162,29 @@ final class Searcher {
                 var r = make(); merge(&r); fused[path] = (w / (k + Double(rank)), r)
             }
         }
-        let pinned = names.filter { $0.tier == .exact }
-        let pinnedPaths = Set(pinned.map(\.path))
-        for (rank, r) in names.enumerated() where !pinnedPaths.contains(r.path) {
-            add(r.path, wName, rank + 1, { r }, { _ in })
+        let pinnedPaths = names.filter { $0.tier == .exact }.map(\.path)
+        let topText = Float(hits.first?.score ?? 1)
+        for (rank, r) in names.enumerated() {
+            add(r.path, wName, rank + 1, { r }, { $0.signal.name = Self.nameStrength(r.tier) })
         }
-        for (rank, h) in hits.enumerated() where !pinnedPaths.contains(h.path) {
+        for (rank, h) in hits.enumerated() {
             add(h.path, wText, rank + 1,
                 { SearchResult(path: h.path, isDir: false, tier: .none, score: 0, sources: []) },
-                { $0.sources.insert(.content); if !h.snippet.isEmpty { $0.snippet = h.snippet } })
+                { r in
+                    r.sources.insert(.content)
+                    if !h.snippet.isEmpty { r.snippet = h.snippet }
+                    r.signal.text = max(0.15, min(1, Float(h.score) / max(topText, 1e-6)))   // BM25 relative to best
+                })
         }
-        for (rank, m) in meaning.enumerated() where !pinnedPaths.contains(m.path) {
+        for (rank, m) in meaning.enumerated() {
             // A file found *only* by meaning needs a confident match to be shown at all.
             if fused[m.path] == nil && m.score < 0.42 { continue }
             add(m.path, wMeaning, rank + 1,
                 { SearchResult(path: m.path, isDir: false, tier: .none, score: 0, sources: []) },
-                { $0.sources.insert(.meaning) })
+                { r in
+                    r.sources.insert(.meaning)
+                    r.signal.meaning = max(0.1, min(1, (m.score - 0.3) / 0.35))           // cosine 0.3...0.65
+                })
         }
         // Signals from the name ranker still apply: frecency and the Finder folder.
         for (p, v) in fused {
@@ -135,10 +192,26 @@ final class Searcher {
             if let ctx = contextFolder, p.hasPrefix(ctx + "/") { bonus += 0.002 }
             fused[p] = (v.score + bonus, v.r)
         }
-        var rest = fused.values.sorted { $0.score > $1.score }.map(\.r)
+        // Exact names first (in name order, now carrying every signal), then the fused rest.
+        let pinned = pinnedPaths.compactMap { fused[$0]?.r }
+        let pinnedSet = Set(pinnedPaths)
+        var rest = fused.values.filter { !pinnedSet.contains($0.r.path) }.sorted { $0.score > $1.score }.map(\.r)
         // Content and meaning hits come from the database; drop any deleted since.
         rest = rest.filter { r in r.sources.contains(.name) || FileManager.default.fileExists(atPath: r.path) }
         return Array((pinned + rest).prefix(limit))
+    }
+
+    /// Name-match strength by tier: how literally the name matched what you typed.
+    static func nameStrength(_ t: Tier) -> Float {
+        switch t {
+        case .exact: return 1
+        case .prefix: return 0.8
+        case .wordSubstring: return 0.65
+        case .substring: return 0.5
+        case .allTokens: return 0.45
+        case .fuzzy: return 0.3
+        case .none: return 0
+        }
     }
 
     // MARK: - Name search
@@ -208,6 +281,54 @@ final class Searcher {
         guard a.count > k else { return }
         a.sort { $0.1 != $1.1 ? $0.1 > $1.1 : $0.2 > $1.2 }
         a.removeLast(a.count - k)
+    }
+}
+
+/// Modification times for every indexed file, for the home screen's activity
+/// chart and `changed:` queries. One parallel stat pass (~20 ms for 20k files),
+/// cached for two minutes.
+final class Activity {
+    private let index: FileIndex
+    private let lock = NSLock()
+    private var cache: [(path: String, mtime: Date)] = []
+    private var built = Date.distantPast
+
+    init(index: FileIndex) { self.index = index }
+
+    func all() -> [(path: String, mtime: Date)] {
+        if let c = lock.withLock({ Date().timeIntervalSince(built) < 120 && !cache.isEmpty ? cache : nil }) { return c }
+        let snap = index.snapshot().filter { $0.alive && !$0.isDir && !$0.path.hasPrefix("/Applications/") }
+        var times = [Double](repeating: 0, count: snap.count)
+        times.withUnsafeMutableBufferPointer { tb in
+            DispatchQueue.concurrentPerform(iterations: 16) { c in
+                var i = c
+                while i < snap.count {
+                    var st = stat()
+                    if lstat(snap[i].path, &st) == 0 { tb[i] = Double(st.st_mtimespec.tv_sec) }
+                    i += 16
+                }
+            }
+        }
+        var out: [(String, Date)] = []
+        out.reserveCapacity(snap.count)
+        for (e, t) in zip(snap, times) where t > 0 { out.append((e.path, Date(timeIntervalSince1970: t))) }
+        out.sort { $0.1 > $1.1 }
+        lock.withLock { cache = out; built = Date() }
+        return out
+    }
+
+    func files(in range: Range<Date>) -> [(path: String, mtime: Date)] { all().filter { range.contains($0.mtime) } }
+
+    /// Files changed per calendar day, oldest first, ending today.
+    func perDay(days: Int) -> [(day: Date, count: Int)] {
+        let cal = Calendar.current
+        let today = cal.startOfDay(for: Date())
+        var counts = [Int](repeating: 0, count: days)
+        for f in all() {
+            let d = cal.dateComponents([.day], from: cal.startOfDay(for: f.mtime), to: today).day ?? Int.max
+            if d >= 0 && d < days { counts[days - 1 - d] += 1 } else if d >= days { break }  // sorted newest first
+        }
+        return (0..<days).map { (cal.date(byAdding: .day, value: $0 - days + 1, to: today)!, counts[$0]) }
     }
 }
 

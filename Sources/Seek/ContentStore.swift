@@ -155,6 +155,26 @@ final class ContentStore {
         }
     }
 
+    /// The stored extracted text of one file (for the evidence pane).
+    func body(path: String) -> String? {
+        readLock.withLock {
+            let q = prepare(reader, "SELECT f.body FROM docs d JOIN fts f ON f.rowid = d.id WHERE d.path = ?")
+            defer { sqlite3_finalize(q) }
+            bind(q, 1, path)
+            return sqlite3_step(q) == SQLITE_ROW ? text(q, 0) : nil
+        }
+    }
+
+    /// Documents of a kind whose text was actually read (e.g. images with OCR text).
+    func countWithText(kind: Int) -> Int {
+        readLock.withLock {
+            let q = prepare(reader, "SELECT count(*) FROM docs d JOIN fts f ON f.rowid = d.id WHERE d.kind = ? AND length(f.body) > 0")
+            defer { sqlite3_finalize(q) }
+            sqlite3_bind_int(q, 1, Int32(kind))
+            return sqlite3_step(q) == SQLITE_ROW ? Int(sqlite3_column_int64(q, 0)) : 0
+        }
+    }
+
     var count: Int {
         readLock.withLock {
             let q = prepare(reader, "SELECT count(*) FROM docs")
@@ -173,20 +193,36 @@ final class ContentStore {
             let quoted = "\"" + w.replacingOccurrences(of: "\"", with: "\"\"") + "\""
             return i == words.count - 1 && w.count >= 2 ? quoted + "*" : quoted
         }.joined(separator: " ")
+        // BM25 scores each word independently, so "func search" ranks a file full of
+        // both words above the one that literally says `func search(`. Exact-phrase
+        // matches therefore go first (last word still a prefix), then everything else.
+        let phrase = words.count >= 2
+            ? "\"" + words.joined(separator: " ").replacingOccurrences(of: "\"", with: "\"\"") + "\""
+              + (words.last!.count >= 2 ? "*" : "")
+            : nil
         return readLock.withLock {
             // Ranking walks only the postings lists of the query terms: sub-millisecond.
             // bm25 weights: a hit in the file name counts 3x a hit in the body.
-            let q = prepare(reader, """
-                SELECT d.path, f.rowid, f.score FROM
-                    (SELECT rowid, bm25(fts, 3.0, 1.0) AS score FROM fts WHERE fts MATCH ? ORDER BY score LIMIT ?) f
-                JOIN docs d ON d.id = f.rowid ORDER BY f.score
-                """)
-            bind(q, 1, match); sqlite3_bind_int(q, 2, Int32(limit))
-            var rows: [(String, Int64, Double)] = []
-            while sqlite3_step(q) == SQLITE_ROW {
-                rows.append((self.text(q, 0), sqlite3_column_int64(q, 1), -sqlite3_column_double(q, 2)))
+            func ranked(_ m: String) -> [(String, Int64, Double)] {
+                let q = prepare(reader, """
+                    SELECT d.path, f.rowid, f.score FROM
+                        (SELECT rowid, bm25(fts, 3.0, 1.0) AS score FROM fts WHERE fts MATCH ? ORDER BY score LIMIT ?) f
+                    JOIN docs d ON d.id = f.rowid ORDER BY f.score
+                    """)
+                defer { sqlite3_finalize(q) }
+                bind(q, 1, m); sqlite3_bind_int(q, 2, Int32(limit))
+                var out: [(String, Int64, Double)] = []
+                while sqlite3_step(q) == SQLITE_ROW {
+                    out.append((self.text(q, 0), sqlite3_column_int64(q, 1), -sqlite3_column_double(q, 2)))
+                }
+                return out
             }
-            sqlite3_finalize(q)
+            var rows = phrase.map(ranked) ?? []
+            let inPhrase = Set(rows.map(\.1))
+            let top = rows.first?.2 ?? 0
+            rows = rows.map { ($0.0, $0.1, $0.2 + top) }   // keep phrase hits strictly above the rest
+            rows += ranked(match).filter { !inPhrase.contains($0.1) }
+            rows = Array(rows.prefix(limit))
 
             // FTS5's snippet() re-tokenizes the whole document (up to 200 KB), which
             // costs more than the search itself. A plain substring scan is far cheaper.
