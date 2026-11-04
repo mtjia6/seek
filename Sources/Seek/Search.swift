@@ -34,6 +34,12 @@ final class Frecency {
         }
     }
 
+    /// Most recently opened paths that still exist.
+    func recent(limit: Int) -> [String] {
+        let sorted = lock.withLock { recs.sorted { $0.value.last > $1.value.last }.map(\.key) }
+        return Array(sorted.lazy.filter { FileManager.default.fileExists(atPath: $0) }.prefix(limit))
+    }
+
     /// 0...300. log-count, halving every 2 weeks since last open.
     func bonus(_ path: String) -> Int {
         lock.withLock {
