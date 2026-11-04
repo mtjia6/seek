@@ -44,6 +44,19 @@ if let ci = args.firstIndex(of: "--content"), ci + 1 < args.count {
             print("  \(h.path)\n      \(snip.prefix(140))")
         }
     }
+    if args.contains("--semantic") {
+        print("semantic: \(content.vectors.rows) document vectors")
+        for q in args[(ci + 1)...] where q != "--semantic" {
+            var hits: [(path: String, score: Float)] = [], ms = Double.infinity
+            for _ in 0..<5 {
+                let t1 = CFAbsoluteTimeGetCurrent()
+                hits = content.semanticSearch(q, minScore: 0)
+                ms = min(ms, (CFAbsoluteTimeGetCurrent() - t1) * 1000)
+            }
+            print("≈≈ \"\(q)\"  \(String(format: "%.1f", ms)) ms")
+            for h in hits.prefix(5) { print(String(format: "  %.3f  ", h.score) + h.path) }
+        }
+    }
     exit(0)
 }
 

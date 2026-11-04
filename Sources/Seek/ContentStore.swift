@@ -28,6 +28,9 @@ final class ContentStore {
                 mtime REAL NOT NULL, size INTEGER NOT NULL, kind INTEGER NOT NULL);
             CREATE VIRTUAL TABLE IF NOT EXISTS fts USING fts5(
                 name, body, tokenize='unicode61 remove_diacritics 2', prefix='2 3');
+            CREATE TABLE IF NOT EXISTS vecs(doc INTEGER NOT NULL, v BLOB NOT NULL);
+            CREATE INDEX IF NOT EXISTS vecs_doc ON vecs(doc);
+            CREATE TABLE IF NOT EXISTS meta(key TEXT PRIMARY KEY, value TEXT);
             """)
         sqlite3_busy_timeout(writer, 2000)
         sqlite3_open_v2(url.path, &reader, SQLITE_OPEN_READONLY | SQLITE_OPEN_NOMUTEX, nil)
@@ -73,13 +76,70 @@ final class ContentStore {
         guard sqlite3_step(q) == SQLITE_ROW else { sqlite3_finalize(q); return nil }
         let id = sqlite3_column_int64(q, 0)
         sqlite3_finalize(q)
-        for sql in ["DELETE FROM fts WHERE rowid = ?", "DELETE FROM docs WHERE id = ?"] {
+        for sql in ["DELETE FROM fts WHERE rowid = ?", "DELETE FROM docs WHERE id = ?", "DELETE FROM vecs WHERE doc = ?"] {
             let d = prepare(writer, sql); sqlite3_bind_int64(d, 1, id); sqlite3_step(d); sqlite3_finalize(d)
         }
         return id
     }
 
+    /// Vectors from different models live in different spaces and can't be
+    /// compared, so switching models throws the old ones away.
+    func useEmbeddingModel(_ name: String) {
+        writeLock.withLock {
+            let q = prepare(writer, "SELECT value FROM meta WHERE key = 'embedding_model'")
+            let current = sqlite3_step(q) == SQLITE_ROW ? text(q, 0) : nil
+            sqlite3_finalize(q)
+            guard current != name else { return }
+            exec(writer, "DELETE FROM vecs")
+            let u = prepare(writer, "INSERT OR REPLACE INTO meta(key, value) VALUES('embedding_model', ?)")
+            bind(u, 1, name); sqlite3_step(u); sqlite3_finalize(u)
+            log("semantic: embedding model is now \(name); re-embedding")
+        }
+    }
+
+    /// Store a document's vector. nil is stored as an empty blob, meaning
+    /// "embedded, nothing usable", so it isn't retried. Call inside `transaction`.
+    func setVector(doc: Int64, _ v: [Float]?) {
+        let ins = prepare(writer, "INSERT INTO vecs(doc, v) VALUES(?, ?)")
+        defer { sqlite3_finalize(ins) }
+        sqlite3_bind_int64(ins, 1, doc)
+        let bytes = v ?? []
+        bytes.withUnsafeBytes { _ = sqlite3_bind_blob(ins, 2, $0.baseAddress ?? UnsafeRawPointer(bitPattern: 1), Int32($0.count), SQLITE_TRANSIENT) }
+        sqlite3_step(ins)
+    }
+
     // MARK: - Reads
+
+    /// Documents with text but no vectors yet, newest first.
+    func missingVectors(limit: Int) -> [(id: Int64, path: String, body: String)] {
+        readLock.withLock {
+            let q = prepare(reader, """
+                SELECT d.id, d.path, f.body FROM docs d JOIN fts f ON f.rowid = d.id
+                WHERE length(f.body) >= 40 AND NOT EXISTS (SELECT 1 FROM vecs v WHERE v.doc = d.id)
+                ORDER BY d.kind, d.mtime DESC LIMIT ?
+                """)
+            sqlite3_bind_int(q, 1, Int32(limit))
+            var out: [(Int64, String, String)] = []
+            while sqlite3_step(q) == SQLITE_ROW { out.append((sqlite3_column_int64(q, 0), text(q, 1), text(q, 2))) }
+            sqlite3_finalize(q)
+            return out
+        }
+    }
+
+    /// Every stored document vector of width `dim`.
+    func allVectors(dim: Int) -> [(doc: Int64, path: String, vector: [Float])] {
+        readLock.withLock {
+            let q = prepare(reader, "SELECT v.doc, d.path, v.v FROM vecs v JOIN docs d ON d.id = v.doc")
+            var out: [(Int64, String, [Float])] = []
+            while sqlite3_step(q) == SQLITE_ROW {
+                guard Int(sqlite3_column_bytes(q, 2)) == dim * 4, let p = sqlite3_column_blob(q, 2) else { continue }
+                let v = Array(UnsafeBufferPointer(start: p.assumingMemoryBound(to: Float.self), count: dim))
+                out.append((sqlite3_column_int64(q, 0), text(q, 1), v))
+            }
+            sqlite3_finalize(q)
+            return out
+        }
+    }
 
     /// path -> (id, mtime, size) for every indexed document, for change detection.
     func stamps() -> [String: Stamp] {

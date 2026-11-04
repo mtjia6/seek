@@ -9,6 +9,8 @@ import Foundation
 final class ContentIndexer {
     let store: ContentStore
     let files: FileIndex
+    let embedder = Embedder()
+    let vectors: VectorIndex
     var onProgress: (() -> Void)?
 
     private let queue = DispatchQueue(label: "seek.content", qos: .utility)
@@ -25,6 +27,15 @@ final class ContentIndexer {
     init(files: FileIndex) {
         self.files = files
         store = ContentStore(url: FileIndex.supportDir.appendingPathComponent("content.sqlite"))
+        vectors = VectorIndex(dim: embedder.dim)
+        if embedder.available { store.useEmbeddingModel(Embedder.modelName) }
+    }
+
+    /// Documents whose meaning is close to the query, even with no shared words.
+    func semanticSearch(_ text: String, k: Int = 30, minScore: Float = 0.3) -> [(path: String, score: Float)] {
+        guard text.split(separator: " ").count >= 2 || text.count >= 8,
+              let q = embedder.vector(text) else { return [] }
+        return vectors.search(q, k: k, minScore: minScore)
     }
 
     struct Job { let path: String; let kind: ContentKind; let mtime: Double; let size: Int64 }
@@ -34,6 +45,10 @@ final class ContentIndexer {
     func fullSync(completion: (() -> Void)? = nil) {
         queue.async { [self] in
             stamps = store.stamps()
+            if vectors.rows == 0 {
+                for d in store.allVectors(dim: embedder.dim) { vectors.add(doc: d.doc, path: d.path, vector: d.vector) }
+                log("semantic: loaded \(vectors.rows) document vectors")
+            }
             var jobs: [Job] = []
             var live = Set<String>()
             for e in files.snapshot() where e.alive && !e.isDir {
@@ -43,14 +58,12 @@ final class ContentIndexer {
             }
             // Files deleted while Seek wasn't running.
             let gone = stamps.keys.filter { !live.contains($0) }
-            if !gone.isEmpty {
-                store.transaction { for p in gone { store.remove(p) } }
-                for p in gone { stamps[p] = nil }
-            }
+            if !gone.isEmpty { removeDocs(gone) }
             // Cheap kinds first, newest files first within a kind: useful results arrive soonest.
             jobs.sort { $0.kind.rawValue != $1.kind.rawValue ? $0.kind.rawValue < $1.kind.rawValue : $0.mtime > $1.mtime }
             log("content: \(stamps.count) up to date, \(jobs.count) to index, \(gone.count) removed")
             run(jobs)
+            embedMissing()
             completion?()
         }
     }
@@ -91,11 +104,16 @@ final class ContentIndexer {
                 removed.append(p)
             }
         }
-        if !removed.isEmpty {
-            store.transaction { for p in removed { store.remove(p) } }
-            for p in removed { stamps[p] = nil }
-        }
+        if !removed.isEmpty { removeDocs(removed) }
         run(jobs)
+        embedMissing()
+    }
+
+    private func removeDocs(_ paths: [String]) {
+        store.transaction {
+            for p in paths { if let id = store.remove(p) { vectors.remove(doc: id) } }
+        }
+        for p in paths { stamps[p] = nil }
     }
 
     // MARK: - Extraction pipeline
@@ -120,6 +138,7 @@ final class ContentIndexer {
             store.transaction {
                 for (j, text) in zip(batch, texts) {
                     // Store failures too (empty body) so they aren't retried on every launch.
+                    if let old = stamps[j.path] { vectors.remove(doc: old.id) }
                     let id = store.upsert(path: j.path, mtime: j.mtime, size: j.size, kind: j.kind.rawValue,
                                           body: text ?? "")
                     stamps[j.path] = .init(id: id, mtime: j.mtime, size: j.size)
@@ -128,6 +147,28 @@ final class ContentIndexer {
             progressLock.withLock { _queued -= batch.count }
             DispatchQueue.main.async { self.onProgress?() }
             i += batch.count
+        }
+    }
+
+    /// Second pass: embed every document that has text but no vector (new,
+    /// changed, or indexed before semantic search existed). ~0.7 ms per doc.
+    private func embedMissing() {
+        guard embedder.available else { return }
+        while true {
+            let batch = store.missingVectors(limit: 256)
+            if batch.isEmpty { return }
+            progressLock.withLock { _queued += batch.count }
+            var out = [[Float]?](repeating: nil, count: batch.count)
+            out.withUnsafeMutableBufferPointer { ob in
+                DispatchQueue.concurrentPerform(iterations: batch.count) { k in
+                    let name = (batch[k].path as NSString).lastPathComponent
+                    ob[k] = Embedder.passage(name: name, body: batch[k].body).flatMap(embedder.vector)
+                }
+            }
+            store.transaction { for (d, v) in zip(batch, out) { store.setVector(doc: d.id, v) } }
+            for (d, v) in zip(batch, out) { if let v { vectors.add(doc: d.id, path: d.path, vector: v) } }
+            progressLock.withLock { _queued -= batch.count }
+            DispatchQueue.main.async { self.onProgress?() }
         }
     }
 }
