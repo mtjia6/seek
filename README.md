@@ -15,6 +15,10 @@
   Press <kbd>⌥ Space</kbd>, type, press <kbd>↩</kbd>.
 </p>
 
+<p align="center">
+  <img src="docs/images/home.png" width="820" alt="Seek's home screen: recently changed files as thumbnails, new files in Downloads, Desktop and Documents, index stats and a 14-day activity chart" />
+</p>
+
 ---
 
 ## Find it the way you remember it
@@ -27,7 +31,30 @@ You remember a file by *something*: its exact name, a phrase inside it, what was
 | `cs2200` | `CS-2200/`, `CS 2200 Textbook.pdf` (separators and case don't matter) |
 | `lease agreement` | the PDFs that *say* "lease agreement", with the line highlighted |
 | `page table base register` | the screenshot of your lecture slide that shows those words |
-| `how virtual memory translation works` | `L07 Memory management.pptx` — no shared keywords needed |
+| `how virtual memory translation works` | `L07 Memory management.docx` — no shared keywords needed |
+
+Every result shows *why* it matched:
+
+<table>
+  <tr>
+    <td width="50%"><img src="docs/images/pdf-evidence.png" alt="Searching 'lease agreement' shows the PDF page with the phrase highlighted" /></td>
+    <td width="50%"><img src="docs/images/screenshot-ocr.png" alt="Searching 'page table base register' finds a screenshot and boxes the words OCR found" /></td>
+  </tr>
+  <tr>
+    <td><b>Inside a PDF.</b> The page region with your phrase highlighted; <kbd>⌥↓</kbd> steps through every hit.</td>
+    <td><b>Inside a screenshot.</b> Text read by OCR, boxed where it appears in the image.</td>
+  </tr>
+  <tr>
+    <td><img src="docs/images/meaning.png" alt="A question finds a lecture document by meaning" /></td>
+    <td><img src="docs/images/name-match.png" alt="Typing 'cs3210' finds the folder 'CS 3210' and lists what is inside" /></td>
+  </tr>
+  <tr>
+    <td><b>By meaning.</b> A question finds the lecture document; the meter shows only the meaning signal fired.</td>
+    <td><b>By name.</b> <code>cs3210</code> finds <code>CS 3210</code>; separators and case don't matter.</td>
+  </tr>
+</table>
+
+<sub>Screenshots use a demo folder of sample files.</sub>
 
 ## Why not Finder?
 
