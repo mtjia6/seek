@@ -1,0 +1,96 @@
+import AppKit
+import PDFKit
+
+enum ContentKind: Int {
+    case text = 1, pdf, rich, office
+}
+
+/// Pulls searchable text out of a file. Everything is capped so one huge file
+/// can't stall the indexer or bloat the database.
+enum Extractor {
+    static let maxChars = 200_000
+
+    static let textExts: Set<String> = [
+        "txt", "md", "markdown", "rst", "org", "tex", "bib", "csv", "tsv", "log",
+        "json", "yaml", "yml", "toml", "xml", "ini", "cfg", "conf", "ipynb",
+        "html", "htm", "css", "scss", "js", "mjs", "ts", "tsx", "jsx", "vue", "svelte",
+        "py", "java", "kt", "scala", "c", "h", "cc", "cpp", "hpp", "m", "mm", "swift",
+        "go", "rs", "rb", "php", "sh", "zsh", "bash", "fish", "sql", "r", "jl", "lua",
+        "hs", "ml", "ex", "exs", "erl", "clj", "dart", "s", "asm", "proto", "gradle",
+        "cmake", "makefile", "dockerfile", "srt", "vtt",
+    ]
+    static let richExts: Set<String> = ["rtf", "doc", "docx", "odt"]
+    static let officeExts: Set<String> = ["pptx", "xlsx"]
+
+    /// Dependency trees and caches: you never want their *contents* in results.
+    static let excludedFragments = ["/go/pkg/mod/", "/venvs/", "/vendor/", "/.build/", "/build/", "/dist/",
+                                    "/target/", "/Pods/"]
+
+    static func kind(for path: String, size: Int64) -> ContentKind? {
+        if excludedFragments.contains(where: path.contains) { return nil }
+        let name = (path as NSString).lastPathComponent.lowercased()
+        let ext = (name as NSString).pathExtension
+        if textExts.contains(ext) || (ext.isEmpty && ["makefile", "dockerfile", "readme"].contains(name)) {
+            return size <= 2_000_000 ? .text : nil
+        }
+        if ext == "pdf" { return size <= 80_000_000 ? .pdf : nil }
+        if richExts.contains(ext) { return size <= 30_000_000 ? .rich : nil }
+        if officeExts.contains(ext) { return size <= 50_000_000 ? .office : nil }
+        return nil
+    }
+
+    static func extract(_ path: String, _ kind: ContentKind) -> String? {
+        switch kind {
+        case .text: return plainText(path)
+        case .pdf: return pdfText(path)
+        case .rich: return richText(path)
+        case .office: return officeText(path)
+        }
+    }
+
+    private static func plainText(_ path: String) -> String? {
+        guard let fh = FileHandle(forReadingAtPath: path) else { return nil }
+        defer { try? fh.close() }
+        guard let data = try? fh.read(upToCount: 256 * 1024), !data.isEmpty else { return nil }
+        if data.prefix(8192).contains(0) { return nil }  // binary masquerading as text
+        return String(decoding: data, as: UTF8.self)
+    }
+
+    private static func pdfText(_ path: String) -> String? {
+        guard let doc = PDFDocument(url: URL(fileURLWithPath: path)), !doc.isLocked else { return nil }
+        var out = ""
+        for i in 0..<min(doc.pageCount, 150) {
+            if let s = doc.page(at: i)?.string { out += s; out += "\n" }
+            if out.count > maxChars { break }
+        }
+        return out.isEmpty ? nil : String(out.prefix(maxChars))
+    }
+
+    private static func richText(_ path: String) -> String? {
+        let s = try? NSAttributedString(url: URL(fileURLWithPath: path), options: [:], documentAttributes: nil)
+        return s.map { String($0.string.prefix(maxChars)) }
+    }
+
+    /// .pptx/.xlsx are zip archives of XML; pull the text nodes out with unzip.
+    private static func officeText(_ path: String) -> String? {
+        let ext = (path as NSString).pathExtension.lowercased()
+        let members = ext == "pptx" ? ["ppt/slides/slide*.xml", "ppt/notesSlides/*.xml"] : ["xl/sharedStrings.xml"]
+        let p = Process()
+        p.executableURL = URL(fileURLWithPath: "/usr/bin/unzip")
+        p.arguments = ["-p", path] + members
+        let pipe = Pipe()
+        p.standardOutput = pipe
+        p.standardError = FileHandle.nullDevice
+        do { try p.run() } catch { return nil }
+        let data = pipe.fileHandleForReading.readDataToEndOfFile()
+        p.waitUntilExit()
+        let xml = String(decoding: data.prefix(4_000_000), as: UTF8.self)
+        // Keep only text between tags.
+        var out = "", inTag = false
+        out.reserveCapacity(xml.count / 3)
+        for ch in xml {
+            if ch == "<" { inTag = true; out.append(" ") } else if ch == ">" { inTag = false } else if !inTag { out.append(ch) }
+        }
+        return String(out.prefix(maxChars))
+    }
+}
