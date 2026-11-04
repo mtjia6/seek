@@ -1,0 +1,46 @@
+name: Release
+
+# Push a tag like v0.2.0 to build Seek.app and publish it as a GitHub Release.
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: macos-15
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set version from tag
+        run: |
+          V=${GITHUB_REF_NAME#v}
+          echo "VERSION=$V" >> $GITHUB_ENV
+          /usr/libexec/PlistBuddy -c "Set :CFBundleShortVersionString $V" Info.plist
+          /usr/libexec/PlistBuddy -c "Set :CFBundleVersion ${{ github.run_number }}" Info.plist
+
+      - name: Build universal app
+        run: ./build.sh --release
+
+      - name: Check the binary runs on both architectures
+        run: |
+          lipo -archs build/Seek.app/Contents/MacOS/Seek
+          build/Seek.app/Contents/MacOS/Seek --query "Safari" | grep -q "Safari.app"
+
+      - name: Package
+        run: |
+          ditto -c -k --keepParent build/Seek.app "Seek-$VERSION.zip"
+          shasum -a 256 "Seek-$VERSION.zip" > SHA256SUMS
+          cat SHA256SUMS
+
+      - name: Publish release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          NOTES=docs/releases/$GITHUB_REF_NAME.md
+          if [[ -f $NOTES ]]; then ARGS=(--notes-file "$NOTES"); else ARGS=(--generate-notes); fi
+          gh release create "$GITHUB_REF_NAME" "Seek-$VERSION.zip" SHA256SUMS \
+            --title "Seek $VERSION" "${ARGS[@]}"

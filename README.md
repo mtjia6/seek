@@ -10,6 +10,10 @@
   <img alt="Swift 6" src="https://img.shields.io/badge/Swift-6-F05138?style=for-the-badge&logo=swift&logoColor=white" />
   <img alt="Runs locally" src="https://img.shields.io/badge/runs-100%25%20local-2E7D32?style=for-the-badge" />
   <img alt="MIT license" src="https://img.shields.io/badge/license-MIT-555555?style=for-the-badge" />
+  <br/>
+  <a href="https://github.com/mtjia6/seek/releases/latest"><img alt="Latest release" src="https://img.shields.io/github/v/release/mtjia6/seek?style=for-the-badge" /></a>
+  <a href="https://github.com/mtjia6/seek/releases/latest"><img alt="Downloads" src="https://img.shields.io/github/downloads/mtjia6/seek/total?style=for-the-badge" /></a>
+  <a href="https://github.com/mtjia6/seek/actions/workflows/ci.yml"><img alt="CI" src="https://img.shields.io/github/actions/workflow/status/mtjia6/seek/ci.yml?branch=main&style=for-the-badge" /></a>
 </p>
 
 <p align="center">
@@ -90,9 +94,14 @@ Finder's search box is a front end to Spotlight's index. When that index is stal
 
 ## Setup
 
-**Requirements:** macOS 14 or later, and the Xcode command-line tools (`xcode-select --install`). About 40 MB of disk for the app and the embedding model.
+### Download (easiest)
 
-**1. Build and install**
+1. Download **`Seek-<version>.zip`** from the [latest release](https://github.com/mtjia6/seek/releases/latest), unzip it, and drag `Seek.app` into **Applications**. It runs on Apple silicon and Intel Macs with macOS 14 or later.
+2. Open it. Seek isn't notarized by Apple yet, so macOS blocks the first launch: click **Done**, then go to **System Settings → Privacy & Security** and click **Open Anyway** next to Seek. You only do this once per version.
+
+### Or build from source
+
+**Requirements:** macOS 14 or later, and the Xcode command-line tools (`xcode-select --install`). About 40 MB of disk for the app and the embedding model.
 
 ```sh
 git clone https://github.com/mtjia6/seek.git
@@ -100,17 +109,21 @@ cd seek
 ./build.sh
 ```
 
-`build.sh` downloads the embedding model on first run (MIT, 30 MB, not stored in git), builds a release binary, bundles and signs `Seek.app`, copies it to `~/Applications`, and launches it. A magnifying-glass icon appears in the menu bar. Seek has no Dock icon.
+`build.sh` downloads the embedding model on first run (MIT, 30 MB, not stored in git), builds a release binary, bundles and signs `Seek.app`, copies it to `~/Applications`, and launches it.
 
-**2. Allow folder access.** macOS asks once each for Desktop, Documents and Downloads. Click **Allow**; Seek can only index what you allow. If you clicked Don't Allow, turn it back on in **System Settings → Privacy & Security → Files and Folders → Seek**.
+### After installing
 
-**3. Wait for the first index.** File names are ready in under a second. Reading contents takes a minute or two in the background (a few minutes more if you have many screenshots to OCR). The menu bar menu and the home screen show progress, and you can search while it runs.
+A magnifying-glass icon appears in the menu bar. Seek has no Dock icon.
 
-**4. Start at login (optional):** **System Settings → General → Login Items → +**, then choose `~/Applications/Seek.app`.
+**Allow folder access.** macOS asks once each for Desktop, Documents and Downloads. Click **Allow**; Seek can only index what you allow. If you clicked Don't Allow, turn it back on in **System Settings → Privacy & Security → Files and Folders → Seek**.
 
-**To update:** `git pull && ./build.sh`. Your index is kept.
+**Wait for the first index.** File names are ready in under a second. Reading contents takes a minute or two in the background (a few minutes more if you have many screenshots to OCR). The menu bar menu and the home screen show progress, and you can search while it runs.
 
-**To uninstall:** quit Seek from its menu, then delete `~/Applications/Seek.app` and `~/Library/Application Support/Seek/`.
+**Start at login (optional):** **System Settings → General → Login Items → +**, then choose `Seek.app`.
+
+**To update:** download the new release and replace the app, or `git pull && ./build.sh`. Your index is kept.
+
+**To uninstall:** quit Seek from its menu, then delete `Seek.app` and `~/Library/Application Support/Seek/`.
 
 ## Usage
 

@@ -47,6 +47,16 @@ APPEARANCE=light scripts/demo/shot.sh pdf "lease agreement"
 
 Images land in `build/shots/`. `shot.sh` presses ⌥Space with `osascript`, so your terminal needs Accessibility permission, and any installed Seek must be quit first. The first run needs a longer `WAIT=15` while the demo home is indexed.
 
+## Releases
+
+Write the notes in `docs/releases/vX.Y.Z.md`, then tag and push:
+
+```sh
+git tag v0.2.0 && git push origin v0.2.0
+```
+
+The Release workflow builds a universal `Seek.app` (`./build.sh --release`), zips it with a `SHA256SUMS` file, and publishes the GitHub Release. The version number comes from the tag.
+
 ## Pull requests
 
 - One topic per PR, with a description of what changed and why.
