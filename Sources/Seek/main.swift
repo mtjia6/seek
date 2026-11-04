@@ -57,6 +57,23 @@ if let ci = args.firstIndex(of: "--content"), ci + 1 < args.count {
             for h in hits.prefix(5) { print(String(format: "  %.3f  ", h.score) + h.path) }
         }
     }
+    if args.contains("--hybrid") {
+        let s = Searcher(index: index, content: content)
+        for q in args[(ci + 1)...] where !q.hasPrefix("--") {
+            var r: [SearchResult] = [], ms = Double.infinity
+            for _ in 0..<5 {
+                let t1 = CFAbsoluteTimeGetCurrent()
+                r = s.search(q) ?? []
+                ms = min(ms, (CFAbsoluteTimeGetCurrent() - t1) * 1000)
+            }
+            print("⊕ \"\(q)\" [\(Searcher.route(q))]  \(String(format: "%.1f", ms)) ms")
+            for x in r.prefix(5) {
+                let src = [x.sources.contains(.name) ? "name" : nil, x.sources.contains(.content) ? "text" : nil,
+                           x.sources.contains(.meaning) ? "meaning" : nil].compactMap { $0 }.joined(separator: "+")
+                print("  [\(x.tier == .exact ? "EXACT" : src)] \((x.path as NSString).lastPathComponent)")
+            }
+        }
+    }
     exit(0)
 }
 
@@ -116,7 +133,7 @@ final class HotKey {
 final class AppDelegate: NSObject, NSApplicationDelegate {
     let index = FileIndex()
     lazy var content = ContentIndexer(files: index)
-    lazy var searcher = Searcher(index: index)
+    lazy var searcher = Searcher(index: index, content: content)
     lazy var panel = SearchPanel(searcher: searcher)
     var status: NSStatusItem!
     var hotKey: HotKey?

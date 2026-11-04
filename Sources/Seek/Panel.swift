@@ -40,7 +40,7 @@ final class SearchPanel: NSObject, NSTextFieldDelegate, NSTableViewDataSource, N
         bg.blendingMode = .behindWindow
         panel.contentView = bg
 
-        field.placeholderString = "Search files by name…   (dir/name to filter by folder)"
+        field.placeholderString = "Search names, contents, screenshots, or describe the file…"
         field.font = .systemFont(ofSize: 22, weight: .light)
         field.isBordered = false
         field.drawsBackground = false
@@ -51,7 +51,7 @@ final class SearchPanel: NSObject, NSTextFieldDelegate, NSTableViewDataSource, N
         let col = NSTableColumn(identifier: .init("c"))
         table.addTableColumn(col)
         table.headerView = nil
-        table.rowHeight = 40
+        table.rowHeight = 44
         table.intercellSpacing = NSSize(width: 0, height: 2)
         table.backgroundColor = .clear
         table.style = .inset
@@ -127,6 +127,7 @@ final class SearchPanel: NSObject, NSTextFieldDelegate, NSTableViewDataSource, N
         let idx = searcher.index
         var parts: [String] = []
         parts.append(idx.isScanning ? "Indexing… \(idx.count.formatted()) so far" : "\(idx.count.formatted()) items")
+        if let c = searcher.content, c.queuedCount > 0 { parts.append("reading contents… \(c.queuedCount.formatted()) left") }
         if !results.isEmpty { parts.append(String(format: "%.1f ms", lastQueryTime)) }
         if let c = searcher.contextFolder { parts.append("boosting \(abbrev(c))") }
         parts.append("↩ open   ⌘↩ show in Finder   ⌥↩ copy path")
@@ -199,13 +200,44 @@ final class SearchPanel: NSObject, NSTextFieldDelegate, NSTableViewDataSource, N
 
     func numberOfRows(in tableView: NSTableView) -> Int { results.count }
 
+    func tableView(_ tableView: NSTableView, heightOfRow row: Int) -> CGFloat {
+        results[row].snippet == nil ? 44 : 62
+    }
+
     func tableView(_ tableView: NSTableView, viewFor tableColumn: NSTableColumn?, row: Int) -> NSView? {
         let cell = (tableView.makeView(withIdentifier: ResultCell.id, owner: nil) as? ResultCell) ?? ResultCell()
         let r = results[row]
         cell.name.stringValue = (r.path as NSString).lastPathComponent
         cell.path.stringValue = abbrev((r.path as NSString).deletingLastPathComponent)
         cell.icon.image = icon(r.path)
+        cell.snippet.attributedStringValue = r.snippet.map(highlight) ?? NSAttributedString()
+        cell.snippet.isHidden = r.snippet == nil
+        cell.badge.stringValue = badge(r)
         return cell
+    }
+
+    /// How the file matched, so a surprising result explains itself.
+    private func badge(_ r: SearchResult) -> String {
+        if r.sources == .name { return "" }
+        let isImage = Extractor.kind(for: r.path) == .image
+        var tags: [String] = []
+        if r.sources.contains(.content) { tags.append(isImage ? "text in image" : "content") }
+        if r.sources.contains(.meaning) { tags.append("meaning") }
+        return tags.joined(separator: " · ")
+    }
+
+    /// \u{1}…\u{2} markers from the content store become bold, accented runs.
+    private func highlight(_ s: String) -> NSAttributedString {
+        let base: [NSAttributedString.Key: Any] = [.font: NSFont.systemFont(ofSize: 11.5), .foregroundColor: NSColor.secondaryLabelColor]
+        let hit: [NSAttributedString.Key: Any] = [.font: NSFont.systemFont(ofSize: 11.5, weight: .semibold), .foregroundColor: NSColor.labelColor]
+        let out = NSMutableAttributedString()
+        var inHit = false
+        for part in s.split(omittingEmptySubsequences: false, whereSeparator: { $0 == "\u{1}" || $0 == "\u{2}" }) {
+            out.append(NSAttributedString(string: String(part), attributes: inHit ? hit : base))
+            inHit.toggle()
+        }
+        // split loses which delimiter was which; markers always alternate open/close, so toggling is exact
+        return out
     }
 
     private func icon(_ path: String) -> NSImage {
@@ -227,6 +259,8 @@ final class ResultCell: NSTableCellView {
     let icon = NSImageView()
     let name = NSTextField(labelWithString: "")
     let path = NSTextField(labelWithString: "")
+    let snippet = NSTextField(labelWithString: "")
+    let badge = NSTextField(labelWithString: "")
 
     init() {
         super.init(frame: .zero)
@@ -236,18 +270,29 @@ final class ResultCell: NSTableCellView {
         path.font = .systemFont(ofSize: 11)
         path.textColor = .secondaryLabelColor
         path.lineBreakMode = .byTruncatingMiddle
-        for v in [icon, name, path] { v.translatesAutoresizingMaskIntoConstraints = false; addSubview(v) }
+        snippet.lineBreakMode = .byTruncatingTail
+        snippet.maximumNumberOfLines = 1
+        badge.font = .systemFont(ofSize: 10, weight: .medium)
+        badge.textColor = .tertiaryLabelColor
+        badge.alignment = .right
+        badge.setContentCompressionResistancePriority(.required, for: .horizontal)
+        for v in [icon, name, path, snippet, badge] { v.translatesAutoresizingMaskIntoConstraints = false; addSubview(v) }
         NSLayoutConstraint.activate([
             icon.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 8),
             icon.centerYAnchor.constraint(equalTo: centerYAnchor),
             icon.widthAnchor.constraint(equalToConstant: 28),
             icon.heightAnchor.constraint(equalToConstant: 28),
             name.leadingAnchor.constraint(equalTo: icon.trailingAnchor, constant: 10),
-            name.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -8),
-            name.topAnchor.constraint(equalTo: topAnchor, constant: 3),
+            name.trailingAnchor.constraint(equalTo: badge.leadingAnchor, constant: -8),
+            name.topAnchor.constraint(equalTo: topAnchor, constant: 4),
+            badge.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -10),
+            badge.firstBaselineAnchor.constraint(equalTo: name.firstBaselineAnchor),
             path.leadingAnchor.constraint(equalTo: name.leadingAnchor),
             path.trailingAnchor.constraint(equalTo: name.trailingAnchor),
             path.topAnchor.constraint(equalTo: name.bottomAnchor, constant: 1),
+            snippet.leadingAnchor.constraint(equalTo: name.leadingAnchor),
+            snippet.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -10),
+            snippet.topAnchor.constraint(equalTo: path.bottomAnchor, constant: 2),
         ])
     }
     required init?(coder: NSCoder) { fatalError() }
