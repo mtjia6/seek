@@ -187,6 +187,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 }
 
 let app = NSApplication.shared
+// Developer aid for screenshots: SEEK_APPEARANCE=light|dark forces the appearance.
+switch ProcessInfo.processInfo.environment["SEEK_APPEARANCE"] {
+case "light": app.appearance = NSAppearance(named: .aqua)
+case "dark": app.appearance = NSAppearance(named: .darkAqua)
+default: break
+}
 let delegate = AppDelegate()
 app.delegate = delegate
 app.setActivationPolicy(.accessory)
