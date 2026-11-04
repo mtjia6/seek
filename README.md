@@ -9,6 +9,7 @@
   <img alt="macOS 14+" src="https://img.shields.io/badge/macOS-14%2B-111111?style=for-the-badge&logo=apple" />
   <img alt="Swift 6" src="https://img.shields.io/badge/Swift-6-F05138?style=for-the-badge&logo=swift&logoColor=white" />
   <img alt="Runs locally" src="https://img.shields.io/badge/runs-100%25%20local-2E7D32?style=for-the-badge" />
+  <img alt="MIT license" src="https://img.shields.io/badge/license-MIT-555555?style=for-the-badge" />
 </p>
 
 <p align="center">
@@ -87,7 +88,54 @@ Finder's search box is a front end to Spotlight's index. When that index is stal
 - **Folder filter.** `dev/notchmusic` limits results to paths containing `dev`.
 - **Date filter.** `changed:today`, `changed:yesterday`, `changed:mon` (any weekday) or `changed:2026-10-30`, optionally with more words.
 
-### Keys
+## Setup
+
+**Requirements:** macOS 14 or later, and the Xcode command-line tools (`xcode-select --install`). About 40 MB of disk for the app and the embedding model.
+
+**1. Build and install**
+
+```sh
+git clone https://github.com/mtjia6/seek.git
+cd seek
+./build.sh
+```
+
+`build.sh` downloads the embedding model on first run (MIT, 30 MB, not stored in git), builds a release binary, bundles and signs `Seek.app`, copies it to `~/Applications`, and launches it. A magnifying-glass icon appears in the menu bar. Seek has no Dock icon.
+
+**2. Allow folder access.** macOS asks once each for Desktop, Documents and Downloads. Click **Allow**; Seek can only index what you allow. If you clicked Don't Allow, turn it back on in **System Settings → Privacy & Security → Files and Folders → Seek**.
+
+**3. Wait for the first index.** File names are ready in under a second. Reading contents takes a minute or two in the background (a few minutes more if you have many screenshots to OCR). The menu bar menu and the home screen show progress, and you can search while it runs.
+
+**4. Start at login (optional):** **System Settings → General → Login Items → +**, then choose `~/Applications/Seek.app`.
+
+**To update:** `git pull && ./build.sh`. Your index is kept.
+
+**To uninstall:** quit Seek from its menu, then delete `~/Applications/Seek.app` and `~/Library/Application Support/Seek/`.
+
+## Usage
+
+Press <kbd>⌥ Space</kbd> anywhere to open Seek. (If another app already owns that shortcut, Seek uses <kbd>⌃⌥ Space</kbd>.) Press <kbd>Esc</kbd> to close.
+
+**Before you type**, the home screen shows files you opened or changed recently, what just arrived in Downloads, Desktop and Documents, and a 14-day activity chart. Use the arrow keys and <kbd>↩</kbd> to open one, or click a day in the chart to list what changed that day.
+
+**Type anything you remember about the file:**
+
+| To find a file by | Type | Example |
+|---|---|---|
+| its name, or part of it | the words, any case, any separators | `cs2200`, `physics award` |
+| words inside it | a phrase from the text | `security deposit refundable` |
+| text in a screenshot or photo | words you saw in the image | `page table base register` |
+| what it's about | a question or description | `how virtual memory translation works` |
+| its folder | folder, a slash, then the name | `dev/notchmusic` |
+| when it changed | `changed:` plus a day, optionally more words | `changed:yesterday pdf`, `changed:mon`, `changed:2026-10-30` |
+
+**Read the results.** The right pane shows why the selected file matched: the highlighted PDF page, the boxed words in a screenshot, the numbered code lines, or a folder's contents. The three bars on each row show how strongly the **name**, the **text** and the **meaning** matched. Press <kbd>⇥</kbd> to narrow results to Names, Contents, Images or Folders.
+
+**Act on a result:** <kbd>↩</kbd> opens it, <kbd>⌘ ↩</kbd> reveals it in Finder, <kbd>⌥ ↩</kbd> copies its path, and <kbd>⌘Y</kbd> previews it with Quick Look. Seek remembers what you open and ranks those files higher next time, but never above an exact name match.
+
+**Menu bar menu:** shows index progress, has **Rebuild Index** (if results ever look stale), and **Quit Seek**.
+
+### All keys
 
 | Key | Action |
 |---|---|
@@ -147,23 +195,7 @@ Measured on 5 natural-language queries over 3.8k of the author's own documents (
 
 Model2Vec distills a sentence transformer (bge-base-en-v1.5) into a single token→vector table, so inference is a lookup and an average, but the vectors keep the teacher's retrieval training. Many windows per file *lost*: each extra window is another chance at a spuriously high cosine, so long noisy files float up.
 
-## Install
-
-Seek is built from source.
-
-**Requirements:** macOS 14+, Xcode command-line tools (Swift 6), ~40 MB disk for the model.
-
-```sh
-git clone https://github.com/mtjia6/seek.git
-cd seek
-./build.sh
-```
-
-`build.sh` downloads the embedding model on first run (MIT, 30 MB, not stored in git), builds a release binary, bundles and signs `Seek.app`, installs it to `~/Applications`, and launches it. macOS will ask once for access to Desktop, Documents and Downloads — Seek can only index what you allow.
-
-To start Seek at login: **System Settings → General → Login Items → +** → `~/Applications/Seek.app`.
-
-### Command-line modes
+## Command-line modes
 
 Useful for benchmarking and testing; each builds its own index and exits.
 
@@ -217,3 +249,11 @@ Working and in daily use on one machine. Known gaps:
 
 - Hybrid retrieval design and query-shape routing inspired by [Kensaku](https://github.com/yjid/kensaku).
 - Semantic search uses [potion-base-8M](https://huggingface.co/minishlab/potion-base-8M) by [Minish Lab](https://github.com/MinishLab/model2vec) (MIT).
+
+## Contributing
+
+Issues and pull requests are welcome; see [CONTRIBUTING.md](CONTRIBUTING.md) for how to build, test, and retake the screenshots. Security issues: please follow [SECURITY.md](SECURITY.md).
+
+## License
+
+[MIT](LICENSE). The potion-base-8M model downloaded by `build.sh` is also MIT-licensed.
