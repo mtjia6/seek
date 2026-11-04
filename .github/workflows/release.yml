@@ -23,7 +23,12 @@ jobs:
           /usr/libexec/PlistBuddy -c "Set :CFBundleVersion ${{ github.run_number }}" Info.plist
 
       - name: Build universal app
-        run: ./build.sh --release
+        run: |
+          set -o pipefail
+          ./build.sh --release 2>&1 | tee build.log || {
+            grep -m10 -E "error:|Error|failed" build.log | sed 's/^/::error::/'
+            exit 1
+          }
 
       - name: Check the binary runs on both architectures
         run: |

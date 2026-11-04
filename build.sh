@@ -20,8 +20,13 @@ if [[ ! -f $MODEL/model.safetensors ]]; then
 fi
 
 if $RELEASE; then
-  swift build -c release --arch arm64 --arch x86_64
-  BIN=$(swift build -c release --arch arm64 --arch x86_64 --show-bin-path)/Seek
+  # One build per architecture, then lipo them into a universal binary.
+  for A in arm64 x86_64; do
+    swift build -c release --triple $A-apple-macosx14.0 --scratch-path .build/$A
+  done
+  BIN=build/Seek-universal
+  mkdir -p build
+  lipo -create -output $BIN .build/arm64/release/Seek .build/x86_64/release/Seek
 else
   swift build -c release
   BIN=.build/release/Seek
