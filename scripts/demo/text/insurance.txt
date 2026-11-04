@@ -1,0 +1,4 @@
+# Renters Insurance Policy
+Policy number RI-2026-00417. Coverage for personal property up to $20,000 and liability up to $100,000.
+# Deductible
+A $500 deductible applies to each claim.

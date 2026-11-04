@@ -4,3 +4,4 @@ build/
 *.xcodeproj/xcuserdata/
 .swiftpm/
 Resources/potion-base-8M/
+demo-home/

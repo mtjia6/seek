@@ -1,4 +1,4 @@
-# CS 3210 Design of Operating Systems — Syllabus
+# OS 101 Operating Systems — Syllabus
 Topics: processes and threads, scheduling, synchronization, virtual memory, file systems, and crash recovery.
 # Grading
 Projects 50%, midterm 20%, final 25%, participation 5%.

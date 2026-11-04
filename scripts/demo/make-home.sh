@@ -1,27 +1,27 @@
 #!/bin/zsh
 # Builds a fake home folder of sample files, used for README screenshots so
 # no real personal files ever appear in them.
-#   scripts/demo/make-home.sh [out-dir]      (default: build/demo-home)
+#   scripts/demo/make-home.sh [out-dir]      (default: demo-home/, git-ignored; not under build/, whose contents Seek never reads)
 set -euo pipefail
 cd "$(dirname "$0")"
-H=${1:-../../build/demo-home}
+H=${1:-../../demo-home}
 T=text
 BIN=../../build/mkdemo
 
 mkdir -p ../../build
 swiftc -O mkdemo.swift -o $BIN
 rm -rf $H
-mkdir -p $H/{Desktop,Downloads,Documents/{Housing,Awards,"School/CS 3210/hw"},Dev/{raytracer/{src,scenes},notes}}
+mkdir -p $H/{Desktop,Downloads,Documents/{Housing,Insurance,"Courses/OS 101/hw"},Dev/{raytracer/{src,scenes},notes}}
 
 $BIN pdf "$H/Documents/Housing/Residential Lease Agreement - 14 Maple St.pdf" $T/lease.txt
 $BIN pdf "$H/Downloads/parking_addendum_signed.pdf" $T/addendum.txt
 $BIN pdf "$H/Downloads/boarding_pass_ATL_SFO.pdf" $T/bp.txt
-$BIN pdf "$H/Documents/Awards/Physics Distinction Award.pdf" $T/award.txt
-$BIN pdf "$H/Documents/School/CS 3210/CS3210 Syllabus Fall 2026.pdf" $T/syllabus.txt
+$BIN pdf "$H/Documents/Insurance/Renters Insurance Policy.pdf" $T/insurance.txt
+$BIN pdf "$H/Documents/Courses/OS 101/OS101 Syllabus.pdf" $T/syllabus.txt
 $BIN png "$H/Desktop/Screenshot 2026-10-31 at 6.41.39 PM.png" $T/ocr.txt
 $BIN png "$H/Desktop/Screenshot 2026-11-02 at 9.12.04 AM.png" $T/ocr2.txt
-textutil -convert docx -output "$H/Documents/School/CS 3210/L07 Memory management.docx" $T/vm.html
-textutil -convert docx -output "$H/Documents/School/CS 3210/L05 CPU scheduling.docx" $T/sched.html
+textutil -convert docx -output "$H/Documents/Courses/OS 101/L07 Memory management.docx" $T/vm.html
+textutil -convert docx -output "$H/Documents/Courses/OS 101/L05 CPU scheduling.docx" $T/sched.html
 
 cat > "$H/Dev/raytracer/src/bvh.rs" <<'EOF'
 use crate::aabb::Aabb;
@@ -37,7 +37,7 @@ printf '# raytracer\n\nA small path tracer in Rust with a BVH and importance sam
 printf 'fn main() {\n    println!("rendering 800x450");\n}\n' > "$H/Dev/raytracer/src/main.rs"
 printf 'date,item,amount\n2026-10-01,rent,1150\n2026-10-03,groceries,64.20\n' > "$H/Documents/budget-2026.csv"
 printf 'Notes from advisor meeting\n- pick electives for spring\n' > "$H/Documents/advisor notes.txt"
-for n in 1 2 3 4 5 6; do printf "# HW$n\n\nProblem 1: explain the trade-offs of question $n.\n" > "$H/Documents/School/CS 3210/hw/hw$n.md"; done
+for n in 1 2 3 4 5 6; do printf "# HW$n\n\nProblem 1: explain the trade-offs of question $n.\n" > "$H/Documents/Courses/OS 101/hw/hw$n.md"; done
 for s in cornell spheres glass bunny dragon sponza; do printf 'camera 0 1 5\nlight 0 4 0\n' > $H/Dev/raytracer/scenes/$s.scene; done
 for n in sampling bvh-notes perf-log todo ideas; do printf "notes on $n\n" > $H/Dev/notes/$n.md; done
 for n in 1 2 3 4 5 6 7 8 9; do printf "journal entry $n\n" > $H/Documents/journal-$n.txt; done

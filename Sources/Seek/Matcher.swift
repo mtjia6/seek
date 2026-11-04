@@ -113,8 +113,8 @@ enum Matcher {
         return fuzzyOrNone(k, q: q, qc: qc)
     }
 
-    /// The query typed without separators ("cs2200") against a name that has
-    /// them ("CS-2200", "CS 2200 Textbook"): match while skipping spaces in the
+    /// The query typed without separators ("q3report") against a name that has
+    /// them ("Q3-Report", "Q3 Report Draft"): match while skipping spaces in the
     /// name. Only starts at word boundaries, so it stays precise.
     @inline(__always)
     static func compactMatch(_ k: UnsafeBufferPointer<UInt8>, stemLen: Int, qc: UnsafeBufferPointer<UInt8>) -> (Tier, Int)? {
@@ -189,7 +189,7 @@ enum Matcher {
         return nil
     }
 
-    /// Substring test over the normalized parent path (for "cs2200/hw3" queries).
+    /// Substring test over the normalized parent path (for "work/budget" queries).
     static func pathContains(_ path: String, _ needle: [UInt8]) -> Bool {
         let parent = (path as NSString).deletingLastPathComponent
         let k = Normalizer.key(parent)

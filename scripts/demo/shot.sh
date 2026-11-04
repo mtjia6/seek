@@ -8,7 +8,7 @@
 # Quit any installed Seek first so the hotkey reaches this instance.
 set -uo pipefail
 cd "$(dirname "$0")/../.."
-H=$PWD/build/demo-home
+H=$PWD/demo-home
 OUT=$PWD/build/shots
 mkdir -p $OUT
 pkill -f .build/release/Seek; sleep 0.6

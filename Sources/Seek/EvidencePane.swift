@@ -228,7 +228,7 @@ final class EvidencePane: NSView {
         title.stringValue = "Ways to search"
         meta.stringValue = "Seek reads names, text inside files, and text inside images."
         folderStack.arrangedSubviews.forEach { $0.removeFromSuperview() }
-        for (q, what) in [("cs2200", "Names ignore case, spaces, dashes and underscores"),
+        for (q, what) in [("q3report", "Names ignore case, spaces, dashes and underscores"),
                           ("dev/notes", "Text before a slash limits results to matching folders"),
                           ("changed:yesterday", "Files changed on a day: today, yesterday, mon...sun, 2026-10-30"),
                           ("how does paging work", "Describe it in words: matched by meaning, not spelling")] {

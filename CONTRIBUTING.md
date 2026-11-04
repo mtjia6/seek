@@ -18,7 +18,7 @@ swift build -c release     # just compile
 There is no XCTest suite yet; the binary has command-line modes that exercise each layer without the UI:
 
 ```sh
-.build/release/Seek --query "exact name" "cs2200"          # name index + matcher
+.build/release/Seek --query "exact name" "q3report"        # name index + matcher
 .build/release/Seek --content "lease agreement" --hybrid    # full text + semantic + fusion
 .build/release/Seek --watch-test                            # create/rename/move/delete is picked up live
 ```
@@ -39,7 +39,7 @@ The README's [component table](README.md#how-it-works) maps each layer to a file
 README screenshots are taken against a fake home folder so no personal files appear:
 
 ```sh
-scripts/demo/make-home.sh                                  # writes build/demo-home
+scripts/demo/make-home.sh                                  # writes demo-home/
 swift build -c release
 scripts/demo/shot.sh home ""                               # home screen
 APPEARANCE=light scripts/demo/shot.sh pdf "lease agreement"

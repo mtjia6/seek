@@ -28,8 +28,8 @@ You remember a file by *something*: its exact name, a phrase inside it, what was
 
 | You type | Seek finds |
 |---|---|
-| `Physics Distinction Award` | the file with exactly that name — always first |
-| `cs2200` | `CS-2200/`, `CS 2200 Textbook.pdf` (separators and case don't matter) |
+| `Quarterly Budget Final` | the file with exactly that name — always first |
+| `q3report` | `Q3-Report/`, `Q3 Report Draft.pdf` (separators and case don't matter) |
 | `lease agreement` | the PDFs that *say* "lease agreement", with the line highlighted |
 | `page table base register` | the screenshot of your lecture slide that shows those words |
 | `how virtual memory translation works` | `L07 Memory management.docx` — no shared keywords needed |
@@ -47,11 +47,11 @@ Every result shows *why* it matched:
   </tr>
   <tr>
     <td><img src="docs/images/meaning.png" alt="A question finds a lecture document by meaning" /></td>
-    <td><img src="docs/images/name-match.png" alt="Typing 'cs3210' finds the folder 'CS 3210' and lists what is inside" /></td>
+    <td><img src="docs/images/name-match.png" alt="Typing 'os101' finds the folder 'OS 101' and lists what is inside" /></td>
   </tr>
   <tr>
     <td><b>By meaning.</b> A question finds the lecture document; the meter shows only the meaning signal fired.</td>
-    <td><b>By name.</b> <code>cs3210</code> finds <code>CS 3210</code>; separators and case don't matter.</td>
+    <td><b>By name.</b> <code>os101</code> finds <code>OS 101</code>; separators and case don't matter.</td>
   </tr>
 </table>
 
@@ -65,7 +65,7 @@ Finder's search box is a front end to Spotlight's index. When that index is stal
 |---|---|---|
 | Exact name always ranked first | ✅ | ❌ mixed with content hits |
 | Independent of Spotlight's index health | ✅ | ❌ |
-| Typo- and separator-tolerant (`cs2200` → `CS-2200`) | ✅ | ❌ word prefixes only |
+| Typo- and separator-tolerant (`q3report` → `Q3-Report`) | ✅ | ❌ word prefixes only |
 | Unicode-normalized names (NFD, U+202F in screenshot names) | ✅ | partial |
 | Full text in code, PDF, DOCX, PPTX, XLSX | ✅ | ✅ |
 | Text inside screenshots and photos (OCR) | ✅ | partial (Live Text, not reliably indexed) |
@@ -85,7 +85,7 @@ Finder's search box is a front end to Spotlight's index. When that index is stal
 - **Evidence pane.** The selected result shows *why* it matched: the PDF page region with your words highlighted, the screenshot with boxes where OCR found them, the numbered code lines, or the matching passage. Step through hits with <kbd>⌥↓</kbd>.
 - **Match meter.** Three thin bars on every row show how strongly the name, the text and the meaning matched.
 - **Home screen.** Before you type: thumbnails of files you opened recently, what just arrived in Downloads/Desktop/Documents, index health, and a 14-day activity chart. Click a day to list what changed.
-- **Folder filter.** `dev/notchmusic` limits results to paths containing `dev`.
+- **Folder filter.** `work/budget` limits results to paths containing `work`.
 - **Date filter.** `changed:today`, `changed:yesterday`, `changed:mon` (any weekday) or `changed:2026-10-30`, optionally with more words.
 
 ## Setup
@@ -122,11 +122,11 @@ Press <kbd>⌥ Space</kbd> anywhere to open Seek. (If another app already owns t
 
 | To find a file by | Type | Example |
 |---|---|---|
-| its name, or part of it | the words, any case, any separators | `cs2200`, `physics award` |
+| its name, or part of it | the words, any case, any separators | `q3report`, `budget final` |
 | words inside it | a phrase from the text | `security deposit refundable` |
 | text in a screenshot or photo | words you saw in the image | `page table base register` |
 | what it's about | a question or description | `how virtual memory translation works` |
-| its folder | folder, a slash, then the name | `dev/notchmusic` |
+| its folder | folder, a slash, then the name | `work/budget` |
 | when it changed | `changed:` plus a day, optionally more words | `changed:yesterday pdf`, `changed:mon`, `changed:2026-10-30` |
 
 **Read the results.** The right pane shows why the selected file matched: the highlighted PDF page, the boxed words in a screenshot, the numbered code lines, or a folder's contents. The three bars on each row show how strongly the **name**, the **text** and the **meaning** matched. Press <kbd>⇥</kbd> to narrow results to Names, Contents, Images or Folders.
@@ -200,7 +200,7 @@ Model2Vec distills a sentence transformer (bge-base-en-v1.5) into a single token
 Useful for benchmarking and testing; each builds its own index and exits.
 
 ```sh
-.build/release/Seek --query "exact name" "cs2200"          # name search
+.build/release/Seek --query "exact name" "q3report"        # name search
 .build/release/Seek --content "lease agreement" --hybrid    # full pipeline
 .build/release/Seek --content "virtual memory" --semantic   # meaning only
 .build/release/Seek --watch-test                            # live-update self-test
