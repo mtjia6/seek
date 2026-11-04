@@ -1,0 +1,31 @@
+name: Wrong result order
+description: The file you wanted exists but wasn't found, or ranked too low.
+labels: [ranking]
+body:
+  - type: input
+    id: query
+    attributes:
+      label: What you typed
+    validations:
+      required: true
+  - type: input
+    id: wanted
+    attributes:
+      label: The file you wanted
+      description: Its name, or a made-up name with the same shape (separators, case, accents, numbers).
+    validations:
+      required: true
+  - type: textarea
+    id: got
+    attributes:
+      label: What Seek showed instead
+      description: The top few results, and where your file appeared (if at all).
+  - type: dropdown
+    id: kind
+    attributes:
+      label: You were searching by
+      options:
+        - File name
+        - Text inside the file
+        - Text inside an image or screenshot
+        - What the file is about

@@ -1,0 +1,37 @@
+name: Bug report
+description: Something crashed, broke, or behaved wrongly.
+labels: [bug]
+body:
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened
+      description: What you did, what you expected, and what you saw instead.
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      placeholder: |
+        1. Press ⌥Space
+        2. Type "..."
+        3. ...
+  - type: input
+    id: macos
+    attributes:
+      label: macOS version
+      placeholder: "15.1"
+    validations:
+      required: true
+  - type: input
+    id: commit
+    attributes:
+      label: Seek commit
+      description: Output of `git rev-parse --short HEAD` in your clone.
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs
+      description: Lines starting with `[seek]` from Console.app, or the output of `--query` / `--content`. Remove any file paths you don't want public.
+      render: text
