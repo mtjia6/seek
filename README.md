@@ -94,14 +94,30 @@ Finder's search box is a front end to Spotlight's index. When that index is stal
 
 ## Setup
 
-### Download (easiest)
+There are two ways to get Seek. Most people should download the app.
 
-1. Download **`Seek-<version>.zip`** from the [latest release](https://github.com/mtjia6/seek/releases/latest), unzip it, and drag `Seek.app` into **Applications**. It runs on Apple silicon and Intel Macs with macOS 14 or later.
-2. Open it. Seek isn't notarized by Apple yet, so macOS blocks the first launch: click **Done**, then go to **System Settings → Privacy & Security** and click **Open Anyway** next to Seek. You only do this once per version.
+| | Download the app | Build from source |
+|---|---|---|
+| Developer tools needed | none | Xcode command-line tools (a few GB) |
+| Compiling | already done | `./build.sh` compiles on your Mac |
+| Embedding model (30 MB) | already inside the app | downloaded by `build.sh` |
+| Apple silicon and Intel | both, in one app | your Mac's chip only |
+| First launch | one-time **Open Anyway** (not notarized yet) | opens normally |
+| Best for | using Seek | changing the code |
 
-### Or build from source
+### Download the app
 
-**Requirements:** macOS 14 or later, and the Xcode command-line tools (`xcode-select --install`). About 40 MB of disk for the app and the embedding model.
+The release is one self-contained `Seek.app`: the compiled program for both Apple silicon and Intel, the embedding model, and its signature. Nothing else gets installed or downloaded. Requires macOS 14 or later.
+
+1. Download **`Seek-<version>.zip`** from the [latest release](https://github.com/mtjia6/seek/releases/latest) and unzip it.
+2. Move `Seek.app` to **Applications**. Seek runs from any folder, but Applications is recommended: macOS runs downloaded apps from a hidden temporary copy until you move them, and "Start at login" breaks if the app later moves.
+3. Open it. Seek isn't notarized by Apple yet, so macOS blocks the first launch: click **Done**, then go to **System Settings → Privacy & Security** and click **Open Anyway** next to Seek. You do this once per version.
+
+To check the download wasn't tampered with, download `SHA256SUMS` from the same release and run `shasum -a 256 -c SHA256SUMS` in the same folder.
+
+### Build from source
+
+**Requirements:** macOS 14 or later, and the Xcode command-line tools (`xcode-select --install`).
 
 ```sh
 git clone https://github.com/mtjia6/seek.git
@@ -109,9 +125,9 @@ cd seek
 ./build.sh
 ```
 
-`build.sh` downloads the embedding model on first run (MIT, 30 MB, not stored in git), builds a release binary, bundles and signs `Seek.app`, copies it to `~/Applications`, and launches it.
+`build.sh` downloads the embedding model on first run (MIT, 30 MB, not stored in git), compiles a release build, bundles and signs `Seek.app`, copies it to `~/Applications` (the Applications folder inside your home folder; no admin password needed), and launches it. `./build.sh --release` builds the same universal app the releases ship, in `build/`, without installing it.
 
-### After installing
+### First run (either way)
 
 A magnifying-glass icon appears in the menu bar. Seek has no Dock icon.
 
@@ -121,7 +137,7 @@ A magnifying-glass icon appears in the menu bar. Seek has no Dock icon.
 
 **Start at login (optional):** **System Settings → General → Login Items → +**, then choose `Seek.app`.
 
-**To update:** download the new release and replace the app, or `git pull && ./build.sh`. Your index is kept.
+**To update:** download the new release and replace `Seek.app` (you'll click **Open Anyway** once more), or run `git pull && ./build.sh`. Your index and settings are kept, and macOS may ask for folder access again.
 
 **To uninstall:** quit Seek from its menu, then delete `Seek.app` and `~/Library/Application Support/Seek/`.
 
@@ -237,7 +253,7 @@ Apple M4 Pro, 14 cores, macOS 27, release build, the author's home folder (19k i
 
 ## Privacy
 
-- Everything runs on your Mac. No network access after `build.sh` downloads the model.
+- Everything runs on your Mac. Seek never connects to the network; the model ships inside the app (or is downloaded once by `build.sh`).
 - The index lives in `~/Library/Application Support/Seek/`; delete that folder to wipe it.
 - Never entered: hidden folders (`.ssh`, `.git`, …), `~/Library` (except cloud folders), `node_modules`, `site-packages`.
 - Names only, contents never read: virtualenvs, Go module cache, `build/`, `dist/`, `target/`, `vendor/`.
@@ -269,4 +285,4 @@ Issues and pull requests are welcome; see [CONTRIBUTING.md](CONTRIBUTING.md) for
 
 ## License
 
-[MIT](LICENSE). The potion-base-8M model downloaded by `build.sh` is also MIT-licensed.
+[MIT](LICENSE). The bundled potion-base-8M model is also MIT-licensed.
