@@ -26,17 +26,25 @@ enum Extractor {
     static let excludedFragments = ["/go/pkg/mod/", "/venvs/", "/vendor/", "/.build/", "/build/", "/dist/",
                                     "/target/", "/Pods/"]
 
-    static func kind(for path: String, size: Int64) -> ContentKind? {
+    /// Cheap check from the path alone (no I/O).
+    static func kind(for path: String) -> ContentKind? {
         if excludedFragments.contains(where: path.contains) { return nil }
         let name = (path as NSString).lastPathComponent.lowercased()
         let ext = (name as NSString).pathExtension
-        if textExts.contains(ext) || (ext.isEmpty && ["makefile", "dockerfile", "readme"].contains(name)) {
-            return size <= 2_000_000 ? .text : nil
-        }
-        if ext == "pdf" { return size <= 80_000_000 ? .pdf : nil }
-        if richExts.contains(ext) { return size <= 30_000_000 ? .rich : nil }
-        if officeExts.contains(ext) { return size <= 50_000_000 ? .office : nil }
+        if textExts.contains(ext) || (ext.isEmpty && ["makefile", "dockerfile", "readme"].contains(name)) { return .text }
+        if ext == "pdf" { return .pdf }
+        if richExts.contains(ext) { return .rich }
+        if officeExts.contains(ext) { return .office }
         return nil
+    }
+
+    static func sizeAllowed(_ kind: ContentKind, _ size: Int64) -> Bool {
+        switch kind {
+        case .text: return size <= 2_000_000
+        case .pdf: return size <= 80_000_000
+        case .rich: return size <= 30_000_000
+        case .office: return size <= 50_000_000
+        }
     }
 
     static func extract(_ path: String, _ kind: ContentKind) -> String? {

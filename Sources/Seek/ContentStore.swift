@@ -104,29 +104,75 @@ final class ContentStore {
     }
 
     /// BM25-ranked search. Every word must appear; the last word is matched as
-    /// a prefix so results appear while you are still typing it.
-    func search(_ text: String, limit: Int = 60) -> [Hit] {
+    /// a prefix so results appear while you are still typing it. Snippets are
+    /// built only for the first `snippets` hits (the rows you can actually see).
+    func search(_ text: String, limit: Int = 60, snippets: Int = 10) -> [Hit] {
         let words = Self.terms(text)
-        guard !words.isEmpty else { return [] }
+        guard !words.isEmpty, words.joined().count >= 2 else { return [] }
         let match = words.enumerated().map { i, w in
             let quoted = "\"" + w.replacingOccurrences(of: "\"", with: "\"\"") + "\""
             return i == words.count - 1 && w.count >= 2 ? quoted + "*" : quoted
         }.joined(separator: " ")
         return readLock.withLock {
+            // Ranking walks only the postings lists of the query terms: sub-millisecond.
             // bm25 weights: a hit in the file name counts 3x a hit in the body.
             let q = prepare(reader, """
-                SELECT d.path, bm25(fts, 3.0, 1.0), snippet(fts, 1, char(1), char(2), '…', 14)
-                FROM fts JOIN docs d ON d.id = fts.rowid
-                WHERE fts MATCH ? ORDER BY bm25(fts, 3.0, 1.0) LIMIT ?
+                SELECT d.path, f.rowid, f.score FROM
+                    (SELECT rowid, bm25(fts, 3.0, 1.0) AS score FROM fts WHERE fts MATCH ? ORDER BY score LIMIT ?) f
+                JOIN docs d ON d.id = f.rowid ORDER BY f.score
                 """)
             bind(q, 1, match); sqlite3_bind_int(q, 2, Int32(limit))
-            var hits: [Hit] = []
+            var rows: [(String, Int64, Double)] = []
             while sqlite3_step(q) == SQLITE_ROW {
-                hits.append(Hit(path: self.text(q, 0), score: -sqlite3_column_double(q, 1), snippet: self.text(q, 2)))
+                rows.append((self.text(q, 0), sqlite3_column_int64(q, 1), -sqlite3_column_double(q, 2)))
             }
             sqlite3_finalize(q)
-            return hits
+
+            // FTS5's snippet() re-tokenizes the whole document (up to 200 KB), which
+            // costs more than the search itself. A plain substring scan is far cheaper.
+            // Pull only the head of each body into Swift; most matches are early.
+            let head = prepare(reader, "SELECT substr(body, 1, 20000) FROM fts WHERE rowid = ?")
+            let full = prepare(reader, "SELECT body FROM fts WHERE rowid = ?")
+            defer { sqlite3_finalize(head); sqlite3_finalize(full) }
+            func fetch(_ st: OpaquePointer?, _ id: Int64) -> String {
+                sqlite3_reset(st); sqlite3_bind_int64(st, 1, id)
+                return sqlite3_step(st) == SQLITE_ROW ? self.text(st, 0) : ""
+            }
+            return rows.enumerated().map { i, r in
+                var snip = ""
+                if i < snippets {
+                    snip = Self.snippet(fetch(head, r.1), words)
+                    if snip.isEmpty { snip = Self.snippet(fetch(full, r.1), words) }
+                }
+                return Hit(path: r.0, score: r.2, snippet: snip)
+            }
         }
+    }
+
+    /// ~120 characters around the first query word, with every word wrapped in
+    /// \u{1}…\u{2} markers for highlighting.
+    static func snippet(_ body: String, _ words: [String]) -> String {
+        let ns = body as NSString
+        let opts: NSString.CompareOptions = [.caseInsensitive, .diacriticInsensitive]
+        var first = NSRange(location: NSNotFound, length: 0)
+        for w in words where w.count >= 2 || words.count == 1 {
+            let r = ns.range(of: w, options: opts)
+            if r.location != NSNotFound && (first.location == NSNotFound || r.location < first.location) { first = r }
+        }
+        guard first.location != NSNotFound else { return "" }
+        let lo = max(0, first.location - 40)
+        let hi = min(ns.length, first.location + 90)
+        var window = ns.substring(with: NSRange(location: lo, length: hi - lo))
+            .components(separatedBy: .whitespacesAndNewlines).filter { !$0.isEmpty }.joined(separator: " ")
+        for w in words.sorted(by: { $0.count > $1.count }) where w.count >= 2 {
+            var out = "", rest = window[...]
+            while let r = rest.range(of: w, options: opts) {
+                out += rest[..<r.lowerBound] + "\u{1}" + rest[r] + "\u{2}"
+                rest = rest[r.upperBound...]
+            }
+            window = out + rest
+        }
+        return (lo > 0 ? "…" : "") + window + (hi < ns.length ? "…" : "")
     }
 
     /// Splits a query into FTS terms the same way the unicode61 tokenizer does.

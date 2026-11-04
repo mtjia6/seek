@@ -30,6 +30,10 @@ final class FileIndex {
     private let eventQueue = DispatchQueue(label: "seek.fsevents")
 
     var onChange: (() -> Void)?
+    /// Paths created, modified, moved or deleted (from FSEvents). Called on a background queue.
+    var onPathsChanged: (([String]) -> Void)?
+    /// A full walk finished.
+    var onScanComplete: (() -> Void)?
     var isScanning: Bool { lock.withLock { scanning } }
     var count: Int { lock.withLock { idByPath.count } }
     func snapshot() -> [Entry] { lock.withLock { entries } }
@@ -92,6 +96,7 @@ final class FileIndex {
         log("indexed \(built.1.count) items in \(String(format: "%.2f", Date().timeIntervalSince(start)))s")
         DispatchQueue.main.async { self.onChange?() }
         saveCache()
+        onScanComplete?()
     }
 
     private static func build(_ items: [Walker.Item]) -> ([Entry], [String: Int]) {
@@ -150,8 +155,8 @@ final class FileIndex {
     private func apply(_ rawPath: String, _ flags: FSEventStreamEventFlags) {
         let path = rawPath.count > 1 && rawPath.hasSuffix("/") ? String(rawPath.dropLast()) : rawPath
         if flags & FSEventStreamEventFlags(kFSEventStreamEventFlagMustScanSubDirs) != 0 {
-            remove(path, subtree: true)
-            addSubtree(path)
+            let gone = remove(path, subtree: true)
+            onPathsChanged?(gone + addSubtree(path))
             return
         }
         guard indexable(path) else { return }
@@ -160,13 +165,15 @@ final class FileIndex {
             let isDir = (st.st_mode & S_IFMT) == S_IFDIR
             let isNew = insert(path, isDir: isDir)
             // A directory that just appeared (created, or moved in) brings its whole subtree.
+            var changed = [path]
             if isDir && isNew,
                descendable(parent: (path as NSString).deletingLastPathComponent,
                            name: (path as NSString).lastPathComponent) {
-                addSubtree(path)
+                changed += addSubtree(path)
             }
+            onPathsChanged?(changed)
         } else {
-            remove(path, subtree: true)
+            onPathsChanged?([path] + remove(path, subtree: true))
         }
     }
 
@@ -181,11 +188,14 @@ final class FileIndex {
         }
     }
 
-    private func addSubtree(_ dir: String) {
-        for it in Walker(descend: descendable).run(roots: [dir]) { insert(it.path, isDir: it.isDir) }
+    private func addSubtree(_ dir: String) -> [String] {
+        let items = Walker(descend: descendable).run(roots: [dir])
+        for it in items { insert(it.path, isDir: it.isDir) }
+        return items.map(\.path)
     }
 
-    private func remove(_ path: String, subtree: Bool) {
+    @discardableResult
+    private func remove(_ path: String, subtree: Bool) -> [String] {
         lock.withLock {
             var doomed: [String] = []
             if idByPath[path] != nil { doomed.append(path) }
@@ -194,6 +204,7 @@ final class FileIndex {
                 for p in idByPath.keys where p.hasPrefix(prefix) { doomed.append(p) }
             }
             for p in doomed { if let id = idByPath.removeValue(forKey: p) { entries[id].alive = false } }
+            return doomed
         }
     }
 

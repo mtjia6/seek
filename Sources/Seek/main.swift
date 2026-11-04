@@ -20,9 +20,39 @@ if let qi = args.firstIndex(of: "--query"), qi + 1 < args.count {
     exit(0)
 }
 
+// Content search test:  Seek --content "words in a file" ...
+if let ci = args.firstIndex(of: "--content"), ci + 1 < args.count {
+    let index = FileIndex()
+    let content = ContentIndexer(files: index)
+    index.rescan()
+    let t0 = Date()
+    let done = DispatchSemaphore(value: 0)
+    content.fullSync { done.signal() }
+    done.wait()
+    print("content index: \(content.indexedCount) docs, sync \(String(format: "%.1f", Date().timeIntervalSince(t0)))s")
+    for q in args[(ci + 1)...] {
+        var hits: [ContentStore.Hit] = [], ms = Double.infinity
+        for _ in 0..<5 {  // best of 5: steady-state latency, not cold-cache
+            let t1 = CFAbsoluteTimeGetCurrent()
+            hits = content.store.search(q)
+            ms = min(ms, (CFAbsoluteTimeGetCurrent() - t1) * 1000)
+        }
+        print("── \"\(q)\"  \(hits.count) hits in \(String(format: "%.1f", ms)) ms")
+        for h in hits.prefix(5) {
+            let snip = h.snippet.replacingOccurrences(of: "\u{1}", with: "[").replacingOccurrences(of: "\u{2}", with: "]")
+                .replacingOccurrences(of: "\n", with: " ")
+            print("  \(h.path)\n      \(snip.prefix(140))")
+        }
+    }
+    exit(0)
+}
+
 // Live-update self-test:  Seek --watch-test
 if args.contains("--watch-test") {
-    let index = FileIndex(); index.startWatching(); index.rescan()
+    let index = FileIndex()
+    let content = ContentIndexer(files: index)
+    index.onPathsChanged = { content.pathsChanged($0) }
+    index.startWatching(); index.rescan()
     let s = Searcher(index: index)
     let dir = NSHomeDirectory() + "/Documents/seek_watch_test_dir"
     let fm = FileManager.default
@@ -32,14 +62,24 @@ if args.contains("--watch-test") {
         print("\(label): \(hits.isEmpty ? "—" : hits.joined(separator: ", "))")
     }
     try? fm.createDirectory(atPath: dir + "/inner", withIntermediateDirectories: true)
-    fm.createFile(atPath: dir + "/inner/zebra quokka.txt", contents: Data())
+    fm.createFile(atPath: dir + "/inner/zebra quokka.txt", contents: Data("the word is xylophonist".utf8))
     check("zebra quokka", "after create      ")
+    func checkContent(_ q: String, _ label: String) {
+        Thread.sleep(forTimeInterval: 1.5)
+        let hits = content.store.search(q).map(\.path)
+        print("\(label): \(hits.isEmpty ? "—" : hits.joined(separator: ", "))")
+    }
+    checkContent("xylophonist", "content indexed   ")
+    try? Data("now it says marimbaist".utf8).write(to: URL(fileURLWithPath: dir + "/inner/zebra quokka.txt"))
+    checkContent("xylophonist", "old content gone  "); checkContent("marimbaist", "edit reindexed    ")
     try? fm.moveItem(atPath: dir + "/inner/zebra quokka.txt", toPath: dir + "/inner/narwhal.txt")
     check("zebra quokka", "old name gone     "); check("narwhal", "new name found    ")
     try? fm.moveItem(atPath: dir, toPath: dir + "_moved")
     check("narwhal", "dir moved         ")
+    checkContent("marimbaist", "content follows mv")
     try? fm.removeItem(atPath: dir + "_moved")
     check("narwhal", "dir deleted       ")
+    checkContent("marimbaist", "content deleted   ")
     exit(0)
 }
 
@@ -62,6 +102,7 @@ final class HotKey {
 
 final class AppDelegate: NSObject, NSApplicationDelegate {
     let index = FileIndex()
+    lazy var content = ContentIndexer(files: index)
     lazy var searcher = Searcher(index: index)
     lazy var panel = SearchPanel(searcher: searcher)
     var status: NSStatusItem!
@@ -79,6 +120,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
 
         index.onChange = { [weak self] in self?.panel.refreshFooter(); self?.rebuildMenu() }
+        let content = self.content
+        content.onProgress = { [weak self] in self?.rebuildMenu() }
+        index.onPathsChanged = { content.pathsChanged($0) }
+        index.onScanComplete = { content.fullSync() }
         rebuildMenu()
 
         DispatchQueue.global(qos: .userInitiated).async { [index] in
@@ -96,6 +141,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                               action: nil, keyEquivalent: "")
         info.isEnabled = false
         m.addItem(info)
+        let q = content.queuedCount
+        let ci = NSMenuItem(title: q > 0 ? "Reading contents… \(q.formatted()) left" : "Contents indexed",
+                            action: nil, keyEquivalent: "")
+        ci.isEnabled = false
+        m.addItem(ci)
         m.addItem(withTitle: "Rebuild Index", action: #selector(rebuild), keyEquivalent: "").target = self
         m.addItem(.separator())
         m.addItem(withTitle: "Quit Seek", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
