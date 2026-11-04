@@ -1,8 +1,9 @@
 import AppKit
 import PDFKit
+import Vision
 
 enum ContentKind: Int {
-    case text = 1, pdf, rich, office
+    case text = 1, pdf, rich, office, image  // raw order = indexing priority (cheap first)
 }
 
 /// Pulls searchable text out of a file. Everything is capped so one huge file
@@ -21,10 +22,11 @@ enum Extractor {
     ]
     static let richExts: Set<String> = ["rtf", "doc", "docx", "odt"]
     static let officeExts: Set<String> = ["pptx", "xlsx"]
+    static let imageExts: Set<String> = ["png", "jpg", "jpeg", "heic", "heif", "tif", "tiff", "webp", "gif", "bmp"]
 
     /// Dependency trees and caches: you never want their *contents* in results.
     static let excludedFragments = ["/go/pkg/mod/", "/venvs/", "/vendor/", "/.build/", "/build/", "/dist/",
-                                    "/target/", "/Pods/"]
+                                    "/target/", "/Pods/", ".xcassets/", "/node_modules/"]
 
     /// Cheap check from the path alone (no I/O).
     static func kind(for path: String) -> ContentKind? {
@@ -35,6 +37,7 @@ enum Extractor {
         if ext == "pdf" { return .pdf }
         if richExts.contains(ext) { return .rich }
         if officeExts.contains(ext) { return .office }
+        if imageExts.contains(ext) { return .image }
         return nil
     }
 
@@ -44,6 +47,7 @@ enum Extractor {
         case .pdf: return size <= 80_000_000
         case .rich: return size <= 30_000_000
         case .office: return size <= 50_000_000
+        case .image: return size >= 15_000 && size <= 40_000_000  // tiny images are icons
         }
     }
 
@@ -53,6 +57,7 @@ enum Extractor {
         case .pdf: return pdfText(path)
         case .rich: return richText(path)
         case .office: return officeText(path)
+        case .image: return ocrText(path)
         }
     }
 
@@ -77,6 +82,20 @@ enum Extractor {
     private static func richText(_ path: String) -> String? {
         let s = try? NSAttributedString(url: URL(fileURLWithPath: path), options: [:], documentAttributes: nil)
         return s.map { String($0.string.prefix(maxChars)) }
+    }
+
+    /// Text in screenshots, photos of whiteboards, scanned pages. Vision runs the
+    /// recognizer on the Neural Engine; "accurate" is ~10x slower than "fast" but
+    /// reads small UI text reliably, and it only ever runs once per image.
+    private static func ocrText(_ path: String) -> String? {
+        let req = VNRecognizeTextRequest()
+        req.recognitionLevel = .accurate
+        req.usesLanguageCorrection = true
+        req.automaticallyDetectsLanguage = true
+        let handler = VNImageRequestHandler(url: URL(fileURLWithPath: path), options: [:])
+        do { try handler.perform([req]) } catch { return nil }
+        let lines = (req.results ?? []).compactMap { $0.topCandidates(1).first?.string }
+        return lines.isEmpty ? nil : String(lines.joined(separator: "\n").prefix(maxChars))
     }
 
     /// .pptx/.xlsx are zip archives of XML; pull the text nodes out with unzip.
