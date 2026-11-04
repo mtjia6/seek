@@ -1,0 +1,6 @@
+# CS 3210 Design of Operating Systems — Syllabus
+Topics: processes and threads, scheduling, synchronization, virtual memory, file systems, and crash recovery.
+# Grading
+Projects 50%, midterm 20%, final 25%, participation 5%.
+# Late Policy
+Each student has three slip days for projects.

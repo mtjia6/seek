@@ -1,0 +1,5 @@
+# 6.2 Context Switches and the Page Table Base Register
+Every process has its own page table. When the processor needs to perform a page lookup, it must know which page table to use.
+This is where the page table base register (PTBR) comes in.
+In the simulator, you can access the page table base register through the global variable pfn_t PTBR.
+Implement the context_switch function in proc.c. Update the PTBR to refer to the new process's page table.
