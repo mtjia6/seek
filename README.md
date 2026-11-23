@@ -162,7 +162,7 @@ Press <kbd>⌥ Space</kbd> anywhere to open Seek. (If another app already owns t
 
 **Act on a result:** <kbd>↩</kbd> opens it, <kbd>⌘ ↩</kbd> reveals it in Finder, <kbd>⌥ ↩</kbd> copies its path, and <kbd>⌘Y</kbd> previews it with Quick Look. Seek remembers what you open and ranks those files higher next time, but never above an exact name match.
 
-**Move or delete several at once:** <kbd>⌘</kbd>-click rows to mark them, hold <kbd>⇧</kbd> with <kbd>↑</kbd> <kbd>↓</kbd> to mark a range, or press <kbd>⌘A</kbd> to mark every result. Then <kbd>⌘M</kbd> moves the marked files to a folder you choose and <kbd>⌘⌫</kbd> moves them to the Trash. With nothing marked, both act on the selected row. <kbd>⌘Z</kbd> puts everything back. A move never overwrites: if the folder already has a file with that name, that file is skipped and stays marked.
+**Move or delete several at once:** <kbd>⌘</kbd>-click rows to mark them, hold <kbd>⇧</kbd> with <kbd>↑</kbd> <kbd>↓</kbd> to mark a range, or press <kbd>⌘A</kbd> to mark every result. Then <kbd>⌘M</kbd> moves the marked files to a folder you choose and <kbd>⌘⌫</kbd> moves them to the Trash. With nothing marked, both act on the selected row. <kbd>⌘Z</kbd> puts everything back. The same actions are buttons along the bottom of the panel (**move**, **delete**, **select all**), so you can click instead. A move never overwrites: if the folder already has a file with that name, that file is skipped and stays marked.
 
 **Menu bar menu:** shows index progress, has **Rebuild Index** (if results ever look stale), and **Quit Seek**.
 
@@ -180,7 +180,7 @@ Press <kbd>⌥ Space</kbd> anywhere to open Seek. (If another app already owns t
 | <kbd>⌘</kbd>-click, <kbd>⇧↑</kbd> <kbd>⇧↓</kbd> | Mark results |
 | <kbd>⌘A</kbd> | Mark all results, or none |
 | <kbd>⌘M</kbd> | Move the marked results (or the selected one) to a folder |
-| <kbd>⌘⌫</kbd> | Move them to the Trash |
+| <kbd>⌘⌫</kbd> | Delete them (they go to the Trash) |
 | <kbd>⌘Z</kbd> | Undo the last move or trash |
 | <kbd>⇥</kbd> / <kbd>⇧⇥</kbd> | Next / previous scope (All, Names, Contents, Images, Folders) |
 | <kbd>⌥↓</kbd> <kbd>⌥↑</kbd> | Next / previous hit inside the selected file |

@@ -130,6 +130,7 @@ final class SearchPanel: NSObject, NSTextFieldDelegate, NSTableViewDataSource, N
     private var rangeBase = Set<String>()       // what was marked before that run
     private var extending = false
     private let actionBar = NSStackView()
+    private var actionBarShows = ""             // which set of buttons is in the bar
     private let fileQueue = DispatchQueue(label: "seek.fileops", qos: .userInitiated)
     private var busy = false                    // a batch is running; main-thread only
     private var lastOp: [(from: String, to: String)]?   // what ⌘Z would put back
@@ -234,17 +235,9 @@ final class SearchPanel: NSObject, NSTextFieldDelegate, NSTableViewDataSource, N
         hints.attributedStringValue = Keycaps.hints([("↩", "open"), ("⌘↩", "reveal"), ("⌘Y", "quick look"), ("⇥", "scope")])
         hints.setContentCompressionResistancePriority(.required, for: .horizontal)
 
-        // While anything is marked, the hints become buttons for the batch.
         actionBar.orientation = .horizontal
-        actionBar.spacing = 16
+        actionBar.spacing = 14
         actionBar.setContentCompressionResistancePriority(.required, for: .horizontal)
-        for (key, label, action) in [("⌘A", "all", #selector(toggleAll)), ("⌘M", "move", #selector(moveTargets)),
-                                     ("⌘⌫", "trash", #selector(trashTargets)), ("esc", "clear", #selector(clearMarks))] {
-            let b = NSButton(title: label, target: self, action: action)
-            b.isBordered = false
-            b.attributedTitle = Keycaps.hints([(key, label)])
-            actionBar.addArrangedSubview(b)
-        }
 
         lines = (0..<3).map { _ in let b = NSBox(); b.boxType = .custom; b.borderWidth = 0; b.fillColor = Theme.line; return b }
         let (hLine, vLine, fLine) = (lines[0], lines[1], lines[2])
@@ -340,16 +333,39 @@ final class SearchPanel: NSObject, NSTextFieldDelegate, NSTableViewDataSource, N
         updateHints()
     }
 
+    /// The footer's right side. On the home screen it is a line of key hints.
+    /// Over results every hint is also a button, so move and trash can be found
+    /// and used without knowing a shortcut.
     private func updateHints() {
-        let marking = !homeMode && !marked.isEmpty
-        hints.isHidden = marking
-        actionBar.isHidden = !marking
-        // While there is something to undo, that is the one hint: the outcome needs the room.
-        hints.attributedStringValue = homeMode
-            ? Keycaps.hints([("←→↑↓", "move"), ("↩", "open"), ("⌘↩", "reveal"), ("⌘Y", "quick look")])
-            : lastOp != nil ? Keycaps.hints([("⌘Z", "undo")])
-            : Keycaps.hints([("↩", "open"), ("⌘↩", "reveal"), ("⌘Y", "quick look"), ("⇥", "scope"), ("⌥↓", "next hit"),
-                             ("⌘A", "select all")])
+        hints.isHidden = !homeMode
+        actionBar.isHidden = homeMode
+        guard !homeMode else {
+            hints.attributedStringValue = Keycaps.hints([("←→↑↓", "move"), ("↩", "open"), ("⌘↩", "reveal"), ("⌘Y", "quick look")])
+            return
+        }
+        hints.attributedStringValue = NSAttributedString()   // hidden, but its width still limits the status text
+        let move = ("⌘M", "move", #selector(moveTargets)), trash = ("⌘⌫", "delete", #selector(trashTargets))
+        let items: [(String, String, Selector)]
+        if !marked.isEmpty {
+            items = [("⌘A", "all", #selector(toggleAll)), move, trash, ("esc", "clear", #selector(clearMarks))]
+        } else if lastOp != nil {
+            items = [("⌘Z", "undo", #selector(undoLast)), move, trash]   // short: the outcome needs the room
+        } else {
+            items = [("↩", "open", #selector(openSelected)), ("⌘↩", "reveal", #selector(revealSelected)),
+                     ("⌘Y", "quick look", #selector(togglePreview)), ("⇥", "scope", #selector(nextScope)),
+                     ("⌘A", "select all", #selector(toggleAll)), move, trash]
+        }
+        let shows = items.map(\.1).joined(separator: ",")
+        guard shows != actionBarShows else { return }
+        actionBarShows = shows
+        for v in actionBar.arrangedSubviews { v.removeFromSuperview() }
+        for (key, label, action) in items {
+            let b = NSButton(title: label, target: self, action: action)
+            b.isBordered = false
+            b.refusesFirstResponder = true
+            b.attributedTitle = Keycaps.hints([(key, label)])
+            actionBar.addArrangedSubview(b)
+        }
     }
 
     private var isOpen = false
@@ -707,6 +723,9 @@ final class SearchPanel: NSObject, NSTextFieldDelegate, NSTableViewDataSource, N
     private enum Action { case open, reveal, copy }
 
     @objc private func doubleClicked() { activate(.open) }
+    @objc private func openSelected() { activate(.open) }
+    @objc private func revealSelected() { activate(.reveal) }
+    @objc private func nextScope() { cycleScope(1) }
 
     private func modifierAction() -> Action {
         let mods = NSApp.currentEvent?.modifierFlags ?? []
@@ -870,7 +889,7 @@ final class SearchPanel: NSObject, NSTextFieldDelegate, NSTableViewDataSource, N
         refreshFooter()
     }
 
-    private func undoLast() {
+    @objc private func undoLast() {
         guard let done = lastOp, !busy else { return }
         lastOp = nil
         busy = true
@@ -898,7 +917,7 @@ final class SearchPanel: NSObject, NSTextFieldDelegate, NSTableViewDataSource, N
         return r >= 0 && r < results.count ? results[r].path : nil
     }
 
-    private func togglePreview() {
+    @objc private func togglePreview() {
         guard currentPath != nil, let ql = QLPreviewPanel.shared() else { return }
         if ql.isVisible { ql.orderOut(nil) } else { ql.makeKeyAndOrderFront(nil) }
     }
