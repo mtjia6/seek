@@ -3,8 +3,9 @@ import AppKit
 /// Every color, font, radius and timing the panel uses. Nothing in the UI code
 /// picks a raw value, so the rules below hold by construction:
 ///
-/// - One accent ("signal orange"), used for the selection bar, the caret,
-///   matched letters and evidence highlights. Never for status or decoration.
+/// - One accent ("signal orange"), used for the selection bar, the checks on
+///   marked rows, the caret, matched letters and evidence highlights. Never
+///   for status or decoration.
 /// - Text contrast (WCAG): ink 14.7:1 / 16.6:1, ink2 >= 5.5:1, ink3 >= 4.6:1
 ///   even on a selected row, accentText >= 4.7:1 (dark / light).
 /// - Radii nest: panel 14 > content box 10 > row and tab 7 > keycap 4,

@@ -122,6 +122,10 @@ final class ResultCell: NSTableCellView {
     private let path = NSTextField(labelWithString: "")
     private let meter = SignalMeter()
     private let shortcut = NSTextField(labelWithString: "")
+    private let mark = NSImageView()
+
+    /// Width of the trailing strip that holds the check; a click there toggles it.
+    static let markSlot: CGFloat = 44
 
     init() {
         super.init(frame: .zero)
@@ -138,8 +142,9 @@ final class ResultCell: NSTableCellView {
         shortcut.textColor = Theme.ink3
         shortcut.alignment = .right
         meter.setContentHuggingPriority(.required, for: .horizontal)
+        mark.symbolConfiguration = .init(pointSize: 13, weight: .medium)
 
-        for v in [icon, name, path, meter, shortcut] { v.translatesAutoresizingMaskIntoConstraints = false; addSubview(v) }
+        for v in [icon, name, path, meter, shortcut, mark] { v.translatesAutoresizingMaskIntoConstraints = false; addSubview(v) }
         NSLayoutConstraint.activate([
             icon.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 14),
             icon.centerYAnchor.constraint(equalTo: centerYAnchor),
@@ -156,18 +161,29 @@ final class ResultCell: NSTableCellView {
             shortcut.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -12),
             shortcut.centerYAnchor.constraint(equalTo: centerYAnchor),
             shortcut.widthAnchor.constraint(equalToConstant: 22),
+            mark.trailingAnchor.constraint(equalTo: shortcut.trailingAnchor),
+            mark.centerYAnchor.constraint(equalTo: centerYAnchor),
         ])
     }
     required init?(coder: NSCoder) { fatalError() }
 
+    /// `marked` is nil until something is marked; from then on every row shows a
+    /// check (filled or empty) where its ⌘-number was.
     func configure(name n: NSAttributedString, path p: String, signal: SearchResult.Signal, showMeter: Bool,
-                   shortcut k: String?, icon img: NSImage) {
+                   shortcut k: String?, marked: Bool?, icon img: NSImage) {
         name.attributedStringValue = n
         path.stringValue = p
         meter.signal = signal
         // No retriever matched (a `changed:` listing): an all-zero meter says nothing.
         meter.isHidden = !showMeter || (signal.name == 0 && signal.text == 0 && signal.meaning == 0)
         shortcut.stringValue = k ?? ""
+        shortcut.isHidden = marked != nil
+        mark.isHidden = marked == nil
+        if let on = marked {
+            mark.image = NSImage(systemSymbolName: on ? "checkmark.circle.fill" : "circle",
+                                 accessibilityDescription: on ? "Selected" : "Not selected")
+            mark.contentTintColor = on ? Theme.accent : Theme.ink3
+        }
         icon.image = img
     }
 }

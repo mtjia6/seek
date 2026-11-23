@@ -123,6 +123,20 @@ final class SearchPanel: NSObject, NSTextFieldDelegate, NSTableViewDataSource, N
     private var evidenceWork: DispatchWorkItem?
     private let loader: EvidenceLoader
 
+    /// Marked files, by path. Paths rather than row numbers: rows are renumbered
+    /// every time the list changes, and a stale number would name another file.
+    private var marked = Set<String>()
+    private var rangeAnchor: Int?               // row where a ⇧-arrow run started
+    private var rangeBase = Set<String>()       // what was marked before that run
+    private var extending = false
+    private let actionBar = NSStackView()
+    private let fileQueue = DispatchQueue(label: "seek.fileops", qos: .userInitiated)
+    private var busy = false                    // a batch is running; main-thread only
+    private var lastOp: [(from: String, to: String)]?   // what ⌘Z would put back
+    private var notice: String?                 // outcome of the last batch, shown in the footer
+    private var choosingFolder = false
+    private var moveDestination: String?
+
     // Geometry (pt). The panel is either compact (just the field) or open; it
     // never resizes per keystroke, so the field never moves under your eyes.
     private let width: CGFloat = 880
@@ -196,7 +210,9 @@ final class SearchPanel: NSObject, NSTextFieldDelegate, NSTableViewDataSource, N
         table.dataSource = self
         table.delegate = self
         table.target = self
+        table.action = #selector(rowClicked)
         table.doubleAction = #selector(doubleClicked)
+        table.refusesFirstResponder = true   // clicking a row must not take typing away from the field
         table.addSubview(indicator, positioned: .below, relativeTo: nil)
         indicator.isHidden = true
 
@@ -218,10 +234,22 @@ final class SearchPanel: NSObject, NSTextFieldDelegate, NSTableViewDataSource, N
         hints.attributedStringValue = Keycaps.hints([("↩", "open"), ("⌘↩", "reveal"), ("⌘Y", "quick look"), ("⇥", "scope")])
         hints.setContentCompressionResistancePriority(.required, for: .horizontal)
 
+        // While anything is marked, the hints become buttons for the batch.
+        actionBar.orientation = .horizontal
+        actionBar.spacing = 16
+        actionBar.setContentCompressionResistancePriority(.required, for: .horizontal)
+        for (key, label, action) in [("⌘A", "all", #selector(toggleAll)), ("⌘M", "move", #selector(moveTargets)),
+                                     ("⌘⌫", "trash", #selector(trashTargets)), ("esc", "clear", #selector(clearMarks))] {
+            let b = NSButton(title: label, target: self, action: action)
+            b.isBordered = false
+            b.attributedTitle = Keycaps.hints([(key, label)])
+            actionBar.addArrangedSubview(b)
+        }
+
         lines = (0..<3).map { _ in let b = NSBox(); b.boxType = .custom; b.borderWidth = 0; b.fillColor = Theme.line; return b }
         let (hLine, vLine, fLine) = (lines[0], lines[1], lines[2])
 
-        for v in [surface, glass, field, hLine, scopeBar, scroll, listMessage, vLine, evidence, home, fLine, status, hints] {
+        for v in [surface, glass, field, hLine, scopeBar, scroll, listMessage, vLine, evidence, home, fLine, status, hints, actionBar] {
             v.translatesAutoresizingMaskIntoConstraints = false; root.addSubview(v)
         }
         NSLayoutConstraint.activate([
@@ -274,6 +302,9 @@ final class SearchPanel: NSObject, NSTextFieldDelegate, NSTableViewDataSource, N
             hints.trailingAnchor.constraint(equalTo: root.trailingAnchor, constant: -16),
             hints.centerYAnchor.constraint(equalTo: status.centerYAnchor),
             hints.leadingAnchor.constraint(greaterThanOrEqualTo: status.trailingAnchor, constant: 16),
+            actionBar.trailingAnchor.constraint(equalTo: hints.trailingAnchor),
+            actionBar.centerYAnchor.constraint(equalTo: status.centerYAnchor),
+            actionBar.leadingAnchor.constraint(greaterThanOrEqualTo: status.trailingAnchor, constant: 16),
         ])
         updateColors()
         setMode(home: true)
@@ -306,9 +337,19 @@ final class SearchPanel: NSObject, NSTextFieldDelegate, NSTableViewDataSource, N
         home.isHidden = !on
         for v in [scopeBar, scroll, evidence, lines[1]] as [NSView] { v.isHidden = on }
         if on { listMessage.isHidden = true }
-        hints.attributedStringValue = on
+        updateHints()
+    }
+
+    private func updateHints() {
+        let marking = !homeMode && !marked.isEmpty
+        hints.isHidden = marking
+        actionBar.isHidden = !marking
+        // While there is something to undo, that is the one hint: the outcome needs the room.
+        hints.attributedStringValue = homeMode
             ? Keycaps.hints([("←→↑↓", "move"), ("↩", "open"), ("⌘↩", "reveal"), ("⌘Y", "quick look")])
-            : Keycaps.hints([("↩", "open"), ("⌘↩", "reveal"), ("⌘Y", "quick look"), ("⇥", "scope"), ("⌥↓", "next hit")])
+            : lastOp != nil ? Keycaps.hints([("⌘Z", "undo")])
+            : Keycaps.hints([("↩", "open"), ("⌘↩", "reveal"), ("⌘Y", "quick look"), ("⇥", "scope"), ("⌥↓", "next hit"),
+                             ("⌘A", "select all")])
     }
 
     private var isOpen = false
@@ -363,6 +404,8 @@ final class SearchPanel: NSObject, NSTextFieldDelegate, NSTableViewDataSource, N
             panel.animator().alphaValue = 1
         }
         installKeyMonitor()
+        marked.removeAll()
+        forgetLastOp()
         runQuery()
         refreshFooter()
     }
@@ -384,12 +427,14 @@ final class SearchPanel: NSObject, NSTextFieldDelegate, NSTableViewDataSource, N
     func windowDidResignKey(_ notification: Notification) {
         // Quick Look takes key status while previewing; that isn't "leaving Seek".
         if QLPreviewPanel.sharedPreviewPanelExists(), QLPreviewPanel.shared().isVisible { return }
+        if choosingFolder { return }   // so does the folder chooser
         hide()
     }
 
     /// ⌘1–⌘9 open a result, ⌘Y toggles Quick Look, ⌥↓/⌥↑ step through hits
-    /// inside the selected file. A local monitor sees these before the field
-    /// editor turns them into text-navigation commands.
+    /// inside the selected file, ⌘A / ⌘M / ⌘⌫ / ⌘Z mark all, move, trash and
+    /// undo. A local monitor sees these before the field editor turns them into
+    /// text-editing commands.
     private func installKeyMonitor() {
         guard keyMonitor == nil else { return }
         keyMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] e in
@@ -401,6 +446,15 @@ final class SearchPanel: NSObject, NSTextFieldDelegate, NSTableViewDataSource, N
             }
             guard mods == .command, let ch = e.charactersIgnoringModifiers else { return e }
             if ch == "y" { self.togglePreview(); return nil }
+            if ch == "z", self.lastOp != nil { self.undoLast(); return nil }
+            if !self.homeMode, !self.results.isEmpty {
+                if ch == "a" { self.toggleAll(); return nil }
+                if e.keyCode == 51 { self.trashTargets(); return nil }
+                // The folder chooser runs its own event loop, so start it once this event
+                // is done. Not via DispatchQueue.main: the main queue does not drain
+                // re-entrantly, and everything else posted to it would wait for the chooser.
+                if ch == "m" { RunLoop.main.perform { self.moveTargets() }; return nil }
+            }
             if self.homeMode, let n = Int(ch), (1...9).contains(n), n <= self.home.paths.count {
                 self.home.select(n - 1); self.home.openSelected(); return nil
             }
@@ -431,6 +485,9 @@ final class SearchPanel: NSObject, NSTextFieldDelegate, NSTableViewDataSource, N
     func refreshFooter() {
         let idx = searcher.index
         var parts: [String] = []
+        updateHints()
+        if let n = notice { status.stringValue = n; return }
+        if !homeMode, !marked.isEmpty { status.stringValue = "\(marked.count) selected"; return }
         if homeMode {
             status.stringValue = searcher.contextFolder.map { "boosting \(abbrev($0))" } ?? "type to search names, contents, and screenshots"
             return
@@ -445,7 +502,7 @@ final class SearchPanel: NSObject, NSTextFieldDelegate, NSTableViewDataSource, N
 
     // MARK: - Query
 
-    func controlTextDidChange(_ obj: Notification) { runQuery() }
+    func controlTextDidChange(_ obj: Notification) { forgetLastOp(); runQuery() }
 
     private var queryText: String { field.stringValue.trimmingCharacters(in: .whitespaces) }
 
@@ -475,6 +532,7 @@ final class SearchPanel: NSObject, NSTextFieldDelegate, NSTableViewDataSource, N
     }
 
     private func showHome() {
+        marked.removeAll()
         setMode(home: true)
         evidenceWork?.cancel()
         refreshFooter()
@@ -523,6 +581,10 @@ final class SearchPanel: NSObject, NSTextFieldDelegate, NSTableViewDataSource, N
 
     private func applyScope(resetSelection: Bool) {
         results = allResults.filter(scope.admits)
+        // A mark you cannot see must not survive: batch actions hit every marked file.
+        marked.formIntersection(results.map(\.path))
+        rangeAnchor = nil
+        updateHints()
         if showingRecents {
             scopeBar.showCaption("Recently opened")
         } else {
@@ -539,13 +601,18 @@ final class SearchPanel: NSObject, NSTextFieldDelegate, NSTableViewDataSource, N
             indicator.isHidden = true
             evidence.showTips()
         } else if resetSelection {
-            table.selectRowIndexes([0], byExtendingSelection: false)
-            table.scrollRowToVisible(0)
-            placeIndicator(animated: false)
-            hit = 0
-            loadEvidence(debounce: false)
+            selectRow(0)
         }
         if QLPreviewPanel.sharedPreviewPanelExists(), QLPreviewPanel.shared().isVisible { QLPreviewPanel.shared().reloadData() }
+    }
+
+    private func selectRow(_ row: Int) {
+        guard row >= 0, row < results.count else { return }
+        table.selectRowIndexes([row], byExtendingSelection: false)
+        table.scrollRowToVisible(row)
+        placeIndicator(animated: false)
+        hit = 0
+        loadEvidence(debounce: false)
     }
 
     func control(_ control: NSControl, textView: NSTextView, doCommandBy sel: Selector) -> Bool {
@@ -565,10 +632,13 @@ final class SearchPanel: NSObject, NSTextFieldDelegate, NSTableViewDataSource, N
         switch sel {
         case #selector(NSResponder.moveDown(_:)): move(1); return true
         case #selector(NSResponder.moveUp(_:)): move(-1); return true
+        case #selector(NSResponder.moveDownAndModifySelection(_:)): extendMarks(1); return true
+        case #selector(NSResponder.moveUpAndModifySelection(_:)): extendMarks(-1); return true
         case #selector(NSResponder.insertTab(_:)): cycleScope(1); return true
         case #selector(NSResponder.insertBacktab(_:)): cycleScope(-1); return true
         case #selector(NSResponder.cancelOperation(_:)):
-            if !field.stringValue.isEmpty { field.stringValue = ""; runQuery() } else { hide() }
+            if !marked.isEmpty { clearMarks(); return true }
+            if !field.stringValue.isEmpty { field.stringValue = ""; forgetLastOp(); runQuery() } else { hide() }
             return true
         case #selector(NSResponder.insertNewline(_:)), #selector(NSResponder.insertNewlineIgnoringFieldEditor(_:)):
             activate(modifierAction())
@@ -585,6 +655,7 @@ final class SearchPanel: NSObject, NSTextFieldDelegate, NSTableViewDataSource, N
     }
 
     func tableViewSelectionDidChange(_ notification: Notification) {
+        if !extending { rangeAnchor = nil }
         placeIndicator(animated: true)
         hit = 0
         loadEvidence(debounce: true)
@@ -661,6 +732,163 @@ final class SearchPanel: NSObject, NSTextFieldDelegate, NSTableViewDataSource, N
         hide()
     }
 
+    // MARK: - Marks and batch actions
+
+    /// What a batch action applies to: the marked files in list order or, with
+    /// nothing marked, the row the cursor is on.
+    private var targets: [String] {
+        guard !homeMode else { return [] }
+        if !marked.isEmpty { return results.map(\.path).filter(marked.contains) }
+        let r = table.selectedRow
+        return r >= 0 && r < results.count ? [results[r].path] : []
+    }
+
+    private func marksChanged() {
+        notice = nil
+        table.reloadData(forRowIndexes: IndexSet(integersIn: 0..<results.count), columnIndexes: [0])
+        updateHints()
+        refreshFooter()
+    }
+
+    private func toggleMark(row: Int) {
+        guard row >= 0, row < results.count else { return }
+        let p = results[row].path
+        if marked.remove(p) == nil { marked.insert(p) }
+        rangeAnchor = nil
+        marksChanged()
+    }
+
+    @objc private func toggleAll() {
+        guard !homeMode, !results.isEmpty else { return }
+        let all = Set(results.map(\.path))
+        marked = marked == all ? [] : all
+        rangeAnchor = nil
+        marksChanged()
+    }
+
+    @objc private func clearMarks() {
+        marked.removeAll()
+        rangeAnchor = nil
+        marksChanged()
+    }
+
+    /// ⇧↓ / ⇧↑: mark everything between where the run started and the cursor,
+    /// so backing up un-marks again, as in Finder.
+    private func extendMarks(_ d: Int) {
+        guard !homeMode, !results.isEmpty, table.selectedRow >= 0 else { return }
+        if rangeAnchor == nil { rangeAnchor = table.selectedRow; rangeBase = marked }
+        extending = true
+        move(d)
+        extending = false
+        guard let a = rangeAnchor, table.selectedRow >= 0 else { return }
+        let r = table.selectedRow
+        marked = rangeBase.union(results[min(a, r)...max(a, r)].map(\.path))
+        marksChanged()
+    }
+
+    /// ⌘-click, or a click on a row's check, marks that row without opening it.
+    @objc private func rowClicked() {
+        let row = table.clickedRow
+        guard row >= 0, row < results.count, let e = NSApp.currentEvent else { return }
+        let x = table.convert(e.locationInWindow, from: nil).x
+        let onCheck = !marked.isEmpty && x >= table.bounds.maxX - ResultCell.markSlot
+        guard e.modifierFlags.contains(.command) || onCheck else { return }
+        toggleMark(row: row)
+        if table.selectedRow < 0 { selectRow(row) }   // AppKit deselects a ⌘-clicked row; keep the cursor
+    }
+
+    private static func describe(_ paths: [String]) -> String {
+        paths.count == 1 ? "\u{201C}\((paths[0] as NSString).lastPathComponent)\u{201D}" : "\(paths.count) items"
+    }
+
+    private static func report(_ out: FileActions.Outcome, names: [String], verb: (String) -> String) -> String {
+        var parts: [String] = []
+        if !names.isEmpty { parts.append(verb(describe(names))) }
+        if out.skipped > 0 { parts.append("\(out.skipped) skipped, name already taken") }
+        if out.failed > 0 { parts.append("\(out.failed) failed" + (out.error.map { ": \($0)" } ?? "")) }
+        return parts.joined(separator: "    ")
+    }
+
+    private func forgetLastOp() { lastOp = nil; notice = nil; refreshFooter() }
+
+    @objc private func trashTargets() {
+        let paths = targets
+        guard !paths.isEmpty, !busy else { return }
+        runBatch("Moving \(Self.describe(paths)) to the Trash…", { FileActions.trash(paths) }) { "Moved \($0) to the Trash" }
+    }
+
+    @objc private func moveTargets() {
+        let paths = targets
+        guard !paths.isEmpty, !busy else { return }
+        let chooser = NSOpenPanel()
+        chooser.canChooseFiles = false
+        chooser.canChooseDirectories = true
+        chooser.canCreateDirectories = true
+        chooser.allowsMultipleSelection = false
+        chooser.prompt = "Move"
+        chooser.message = "Move \(Self.describe(paths)) to:"
+        chooser.directoryURL = URL(fileURLWithPath: moveDestination ?? (paths[0] as NSString).deletingLastPathComponent)
+        choosingFolder = true
+        NSApp.activate(ignoringOtherApps: true)
+        let ok = chooser.runModal() == .OK
+        choosingFolder = false
+        panel.makeKeyAndOrderFront(nil)
+        guard ok, let dir = chooser.url?.path else { return }
+        moveDestination = dir
+        let shown = abbrev(dir)
+        runBatch("Moving \(Self.describe(paths))…", { FileActions.move(paths, into: dir) }) { "Moved \($0) to \(shown)" }
+    }
+
+    /// File work happens off the main thread (a move across volumes is a copy);
+    /// the list is updated when it reports back.
+    private func runBatch(_ progress: String, _ op: @escaping () -> FileActions.Outcome,
+                          verb: @escaping (String) -> String) {
+        busy = true
+        notice = progress
+        refreshFooter()
+        let cursor = table.selectedRow
+        fileQueue.async { [weak self] in
+            let out = op()
+            DispatchQueue.main.async { self?.batchFinished(out, cursor: cursor, verb: verb) }
+        }
+    }
+
+    private func batchFinished(_ out: FileActions.Outcome, cursor: Int, verb: (String) -> String) {
+        busy = false
+        lastOp = out.done.isEmpty ? nil : out.done
+        notice = Self.report(out, names: out.done.map(\.from), verb: verb)
+        // The list is a snapshot from before the change. Drop what just left,
+        // and anything that was inside a folder that left.
+        let gone = Set(out.done.map(\.from))
+        if !gone.isEmpty {
+            let inside = gone.map { $0 + "/" }
+            allResults.removeAll { r in gone.contains(r.path) || inside.contains { r.path.hasPrefix($0) } }
+            applyScope(resetSelection: false)
+            selectRow(min(cursor, results.count - 1))
+            searcher.index.noteChanged(out.done.flatMap { [$0.from, $0.to] })
+        }
+        refreshFooter()
+    }
+
+    private func undoLast() {
+        guard let done = lastOp, !busy else { return }
+        lastOp = nil
+        busy = true
+        notice = "Putting back…"
+        refreshFooter()
+        fileQueue.async { [weak self] in
+            let out = FileActions.undo(done)
+            DispatchQueue.main.async {
+                guard let self else { return }
+                self.busy = false
+                self.notice = Self.report(out, names: out.done.map(\.to)) { "Put back \($0)" }
+                self.refreshFooter()
+                // Search again once the index knows they are back.
+                self.searcher.index.noteChanged(out.done.flatMap { [$0.from, $0.to] }) { [weak self] in self?.runQuery() }
+            }
+        }
+    }
+
     // MARK: - Quick Look
 
     /// The file the keyboard is on, in whichever mode is showing.
@@ -709,7 +937,8 @@ final class SearchPanel: NSObject, NSTextFieldDelegate, NSTableViewDataSource, N
         cell.configure(name: highlightName((r.path as NSString).lastPathComponent),
                        path: abbrev((r.path as NSString).deletingLastPathComponent),
                        signal: r.signal, showMeter: !showingRecents,
-                       shortcut: row < 9 ? "⌘\(row + 1)" : nil, icon: icon(r.path))
+                       shortcut: row < 9 ? "⌘\(row + 1)" : nil,
+                       marked: marked.isEmpty ? nil : marked.contains(r.path), icon: icon(r.path))
         return cell
     }
 

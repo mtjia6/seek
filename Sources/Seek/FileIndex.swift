@@ -152,6 +152,17 @@ final class FileIndex {
         DispatchQueue.main.async { self.onChange?() }
     }
 
+    /// Paths this app just moved or trashed itself. Applying them now, instead of
+    /// waiting out FSEvents' latency, keeps the next search from returning a file
+    /// that is no longer there. The real events still arrive; applying a path
+    /// twice is harmless.
+    func noteChanged(_ paths: [String], then done: (() -> Void)? = nil) {
+        eventQueue.async {
+            for p in paths { self.apply(p, 0) }
+            DispatchQueue.main.async { self.onChange?(); done?() }
+        }
+    }
+
     private func apply(_ rawPath: String, _ flags: FSEventStreamEventFlags) {
         let path = rawPath.count > 1 && rawPath.hasSuffix("/") ? String(rawPath.dropLast()) : rawPath
         if flags & FSEventStreamEventFlags(kFSEventStreamEventFlagMustScanSubDirs) != 0 {
