@@ -33,6 +33,8 @@ enum Scope: Int, CaseIterable {
 /// so every visible tab leads somewhere.
 final class ScopeBar: NSView {
     var onSelect: ((Scope) -> Void)?
+    /// The tabs must fit in this width (the list column); past it lies the evidence pane.
+    var fitWidth: CGFloat = 356
     private(set) var selected: Scope = .all
     private var buttons: [Scope: NSButton] = [:]
     private let stack = NSStackView()
@@ -73,18 +75,26 @@ final class ScopeBar: NSView {
         caption.isHidden = true
         stack.isHidden = false
         self.selected = selected
-        for s in Scope.allCases {
-            guard let b = buttons[s] else { continue }
-            let n = counts[s] ?? 0
-            b.isHidden = s != .all && n == 0
-            let on = s == selected
-            let t = NSMutableAttributedString(string: "  " + s.title, attributes: [
-                .font: Theme.ui(12, on ? .semibold : .regular), .foregroundColor: on ? Theme.ink : Theme.ink2])
-            t.append(NSAttributedString(string: " \(n)  ", attributes: [.font: Theme.mono(10.5), .foregroundColor: Theme.ink3]))
-            b.attributedTitle = t
-            b.effectiveAppearance.performAsCurrentDrawingAppearance {
-                b.layer?.backgroundColor = on ? Theme.keycap.cgColor : NSColor.clear.cgColor
+        let shown = Scope.allCases.filter { $0 == .all || (counts[$0] ?? 0) > 0 }
+        for s in Scope.allCases { buttons[s]?.isHidden = !shown.contains(s) }
+        // All five tabs with their counts are wider than the list column. When
+        // they don't fit, the tabs you are not on drop their count and padding.
+        for compact in [false, true] {
+            var width = CGFloat(shown.count - 1) * stack.spacing
+            for s in shown {
+                guard let b = buttons[s] else { continue }
+                let on = s == selected, tight = compact && !on
+                let t = NSMutableAttributedString(string: (tight ? " " : "  ") + s.title, attributes: [
+                    .font: Theme.ui(12, on ? .semibold : .regular), .foregroundColor: on ? Theme.ink : Theme.ink2])
+                t.append(NSAttributedString(string: tight ? " " : " \(counts[s] ?? 0)  ",
+                                            attributes: [.font: Theme.mono(10.5), .foregroundColor: Theme.ink3]))
+                b.attributedTitle = t
+                b.effectiveAppearance.performAsCurrentDrawingAppearance {
+                    b.layer?.backgroundColor = on ? Theme.keycap.cgColor : NSColor.clear.cgColor
+                }
+                width += b.intrinsicContentSize.width
             }
+            if width <= fitWidth - 20 { break }   // 12 pt lead-in, and clear of the divider
         }
     }
 }
@@ -194,6 +204,7 @@ final class SearchPanel: NSObject, NSTextFieldDelegate, NSTableViewDataSource, N
         field.cell?.lineBreakMode = .byTruncatingTail
 
         scopeBar.onSelect = { [weak self] s in self?.setScope(s) }
+        scopeBar.fitWidth = listW
         home.onOpen = { [weak self] p in self?.perform(self?.modifierAction() ?? .open, on: p) }
         home.onPickDay = { [weak self] d in self?.searchChanged(on: d) }
         home.onSelectionChange = { [weak self] in
